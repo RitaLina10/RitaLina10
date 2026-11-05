@@ -33,6 +33,7 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 | **📺 PH IPTV — Android** | Player IPTV para celulares e TVs Android | Flutter · Dart |
 | **📺 PH IPTV — Samsung Tizen** | Player IPTV para Smart TVs Samsung Tizen (2018+) | JavaScript · Tizen |
 | **🎧 Helpdesk** | Sistema de chamados de TI para empresas, com painel de atendimento, relatórios e controle por setor | React · Node.js · PostgreSQL · Docker |
+| **💽 PH Gerenciamento de Partições** | Gerenciador de partições para Windows e Windows Server: redimensiona, move e realoca espaço não alocado com simulação antes de aplicar | Python · Tkinter · PowerShell |
 
 ---
 
@@ -43,6 +44,7 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 **Linguagens**
 
 <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript" />
+<img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
 <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white" alt="Dart" />
 <img src="https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white" alt="HTML5" />
 <img src="https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white" alt="CSS3" />
