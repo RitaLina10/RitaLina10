@@ -15,7 +15,7 @@
 
 ## 🧑‍💻 Sobre mim
 
-Sou **Gerente de Marketing e responsável pela TI** no **Frigorífico Paladar**. Uno as duas áreas para resolver problemas reais do dia a dia da empresa.
+Sou **Gerente de Marketing e faço parte da equipe de TI** no **Frigorífico Paladar**. Uno as duas áreas para resolver problemas reais do dia a dia da empresa.
 
 Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvimento para criar soluções sob medida para os problemas que aparecem. Nas horas vagas, transformo essas ideias em aplicativos.
 
