@@ -34,6 +34,9 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 | **📺 PH IPTV — Samsung Tizen** | Player IPTV para Smart TVs Samsung Tizen (2018+) | JavaScript · Tizen |
 | **🎧 Helpdesk** | Sistema de chamados de TI para empresas, com painel de atendimento, relatórios e controle por setor | React · Node.js · PostgreSQL · Docker |
 | **💽 PH Gerenciamento de Partições** | Gerenciador de partições para Windows e Windows Server: redimensiona, move e realoca espaço não alocado com simulação antes de aplicar | Python · Tkinter · PowerShell |
+| **🔑 PH IPTV — Licenças** | Servidor de licenças do PH IPTV: emissão, validação e controle das licenças dos apps | PHP |
+| **🤖 Agente de Vendas** | Agente de vendas automatizado no WhatsApp, com atendimento assistido por IA | TypeScript · Node.js · Claude |
+| **🛡️ Proteção do DWAgent** | Mantém o acesso remoto (DWAgent) sempre ativo no Windows e exige senha para desativar ou desinstalar | PowerShell |
 
 ---
 
@@ -45,7 +48,10 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 
 <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript" />
 <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
+<img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
 <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white" alt="Dart" />
+<img src="https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP" />
+<img src="https://img.shields.io/badge/PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell" />
 <img src="https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white" alt="HTML5" />
 <img src="https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white" alt="CSS3" />
 <img src="https://img.shields.io/badge/SQL-4479A1?style=flat-square&logo=postgresql&logoColor=white" alt="SQL" />
