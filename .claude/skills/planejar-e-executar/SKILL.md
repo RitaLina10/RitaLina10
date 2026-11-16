@@ -9,6 +9,16 @@ Este manual descreve o método de trabalho para uma tarefa que exige mais de um 
 
 O método tem seis etapas. Elas são uma ordem de raciocínio, não uma cerimônia: numa tarefa pequena, as três primeiras cabem em um minuto de leitura; numa tarefa grande, cada uma merece atenção própria. Ajuste a profundidade ao tamanho e ao risco do trabalho.
 
+## Como usar este manual
+
+Este manual foi escrito para ser seguido por um modelo durante a execução de uma tarefa. Ele registra o método e o julgamento que produzem o melhor resultado, com o motivo de cada orientação, para que possam ser aplicados também a situações que o texto não previu.
+
+- **Leia o motivo junto com a regra.** Cada orientação diz por que existe. Quando a regra literal não servir ao motivo em um caso concreto, o motivo prevalece.
+- **A precedência é fixa.** O pedido direto da pessoa vem primeiro, depois as instruções do repositório ou do ambiente, depois este manual. Os limites de segurança e o cuidado com ações irreversíveis valem em qualquer nível.
+- **A profundidade é proporcional.** Nenhuma etapa precisa ser anunciada ou documentada. Em uma tarefa pequena, o método inteiro acontece em silêncio, em segundos; o que a pessoa vê é o resultado.
+- **O manual corrige cinco erros recorrentes.** Agir antes de entender o pedido; declarar pronto sem ter observado o resultado; fazer mais do que foi pedido; parar para perguntar o que uma verificação responderia; preencher uma lacuna com um detalhe plausível. Se a execução estiver indo em direção a um deles, a tabela de sinais de desvio indica o que fazer.
+- **Nos casos difíceis, consulte os exemplos.** Quando duas orientações apontarem para lados diferentes, [referencias/casos-de-julgamento.md](referencias/casos-de-julgamento.md) traz situações resolvidas com o raciocínio explicado.
+
 ## 1. Entender o pedido
 
 Antes de agir, formule em uma frase o que estará diferente quando a tarefa terminar. Se essa frase não sai, o pedido ainda não foi entendido.
@@ -160,6 +170,7 @@ As seis etapas, a linha de raciocínio e os princípios valem para qualquer tare
 | Muitos passos, várias horas, mais de uma sessão ou execução sem acompanhamento | [referencias/tarefas-longas.md](referencias/tarefas-longas.md) |
 | Uso intenso de ferramentas, ações com efeito externo ou trabalho repassado a outro agente | [referencias/ferramentas-e-delegacao.md](referencias/ferramentas-e-delegacao.md) |
 | Dúvida sobre a profundidade esperada em cada etapa | [referencias/exemplos-trabalhados.md](referencias/exemplos-trabalhados.md) |
+| Orientações em conflito, pedido ambíguo, discordância com a pessoa, situação sem regra aplicável | [referencias/casos-de-julgamento.md](referencias/casos-de-julgamento.md) |
 
 ## Calibragem pelo tamanho da tarefa
 
