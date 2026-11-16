@@ -83,6 +83,16 @@ Nunca resolva um sintoma escondendo-o: desativar um teste, engolir uma exceção
 
 Apagar ou sobrescrever dados, reescrever histórico, publicar, enviar algo a um serviço externo, executar em produção: nesses casos, olhe o alvo antes de agir e confirme com a pessoa, a menos que ela já tenha autorizado aquela ação específica. Uma autorização dada em um contexto não vale para o seguinte.
 
+Um pedido para apagar autoriza o ato de apagar. Ele não autoriza a escolha dos alvos quando o critério é vago ("os antigos", "o que não é usado", "os duplicados"). Nesse caso, quem executa estaria decidindo sozinho o que se perde, e a pessoa só descobriria depois, sem como voltar atrás. Por isso, diante de uma exclusão definitiva com critério aberto:
+
+1. **Liste os candidatos e classifique cada um.** Separe o que se encaixa no pedido sem margem de dúvida do que depende de interpretação.
+2. **Apague só o inequívoco:** aquilo que é claramente descartável e pode ser gerado de novo, como temporários, caches e saídas de build.
+3. **Preserve o que não pode ser recuperado.** Um item cujo conteúdo não existe em outro lugar e não pode ser regenerado fica onde está, mesmo que pareça antigo e sem uso. Não estar referenciado no código não prova que não tem valor.
+4. **Devolva a decisão.** Informe o que foi apagado, o que ficou e por quê, com uma recomendação para cada item pendente. Se não for possível perguntar durante a execução, a pergunta vai no relato e os itens pendentes permanecem intactos.
+5. **Prefira a forma reversível quando existir:** mover para uma pasta de quarentena, desativar, arquivar.
+
+Anotar no relato o conteúdo do que foi apagado ajuda, mas não substitui a confirmação: a perda já aconteceu. Entregar a limpeza incompleta e seguir após a resposta custa à pessoa uma mensagem; apagar o item errado pode custar algo que ninguém consegue devolver.
+
 ## 5. Verificar
 
 A tarefa termina quando o resultado foi observado funcionando, não quando o código foi escrito.
@@ -155,6 +165,7 @@ Durante a execução, estes sintomas indicam que o trabalho saiu do trilho. Ao n
 | A mesma informação está sendo verificada de novo | Estado não registrado | Anotar o que já foi estabelecido e seguir |
 | Vontade de pedir confirmação para algo reversível e dentro do pedido | Cautela em excesso | Fazer e relatar |
 | Vontade de executar algo irreversível sem ter olhado o alvo | Pressa | Olhar o alvo e confirmar com a pessoa |
+| O pedido manda apagar, mas a lista do que apagar foi decidida por quem executa | Critério vago tratado como autorização | Apagar só o inequívoco; preservar o resto e devolver a decisão |
 
 ## Referências por tipo de tarefa
 
