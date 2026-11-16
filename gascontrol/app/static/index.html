@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GasControl — Gestão de Cilindros</title>
 <link rel="stylesheet" href="/static/styles.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0e2a47">
 </head>
 <body>
 <section id="login-view" class="center hidden">
@@ -22,6 +25,8 @@
   <header class="topbar">
     <strong>GasControl</strong>
     <nav id="nav"></nav>
+    <span id="net" class="net"><span id="net-label"></span>
+      <button id="sync-now" class="ghost sm" type="button">Sincronizar</button></span>
     <span id="who" class="muted"></span>
     <button id="logout" class="ghost" type="button">Sair</button>
   </header>

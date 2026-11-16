@@ -78,6 +78,11 @@ def approved_lot(client, users, gas_id, code="L-001"):
         "analysis_report": "LA-2026-001"})
     assert r.status_code == 201, r.text
     lot = r.json()
-    r = client.post(f"/api/lots/{lot['id']}/decision", headers=users["GESTOR"], json={"approve": True})
+    r = client.post(f"/api/lots/{lot['id']}/decision", headers=users["GESTOR"],
+                    json={"approve": True, "signature_password": PWD})
     assert r.status_code == 200, r.text
     return r.json()
+
+
+CHECKLIST_OK = {"inspecao_visual": True, "valvula": True, "identificacao": True, "cor_padrao": True,
+                "purga_vacuo": True}

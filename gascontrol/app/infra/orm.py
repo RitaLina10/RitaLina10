@@ -57,6 +57,8 @@ class Lot(Base):
     released_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     release_notes: Mapped[str | None] = mapped_column(String(500))
+    signature_meaning: Mapped[str | None] = mapped_column(String(160))
+    signature_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     gas_type: Mapped[GasType] = relationship(lazy="joined")
     __table_args__ = (CheckConstraint("expiry_date >= production_date", name="ck_lot_dates"),)
@@ -109,6 +111,9 @@ class Movement(Base):
     longitude: Mapped[float | None] = mapped_column(Numeric(9, 6))
     notes: Mapped[str | None] = mapped_column(Text)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    client_occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    offline: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    checklist: Mapped[str | None] = mapped_column(Text)  # JSON da inspeção pré-envase
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64), unique=True)
 
@@ -121,3 +126,28 @@ class Movement(Base):
         Index("ix_mov_cyl_time", "cylinder_id", "occurred_at"),
         UniqueConstraint("cylinder_id", "prev_hash", name="uq_mov_chain"),  # impede bifurcação
     )
+
+
+class SyncReceipt(Base):
+    """Recibo de idempotência: a mesma operação offline reenviada nunca duplica movimentação."""
+    __tablename__ = "sync_receipts"
+    client_uuid: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String(20))
+    movement_ids: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuditEvent(Base):
+    """Trilha de auditoria de cadastros (append-only, encadeada por hash global)."""
+    __tablename__ = "audit_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[str] = mapped_column(String(40))
+    entity: Mapped[str] = mapped_column(String(40))
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    data: Mapped[str] = mapped_column(Text)
+    prev_hash: Mapped[str] = mapped_column(String(64), unique=True)  # impede bifurcação
+    hash: Mapped[str] = mapped_column(String(64), unique=True)
+    user: Mapped[User | None] = relationship(lazy="joined")

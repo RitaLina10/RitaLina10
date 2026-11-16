@@ -200,3 +200,59 @@ def _json_default(o: object) -> str:
     if isinstance(o, (date, datetime)):
         return o.isoformat()
     raise TypeError(f"tipo não serializável: {type(o)!r}")
+
+
+# ---------------- Inspeção pré-envase (BPF) ----------------
+
+FILL_CHECKLIST: dict[str, str] = {
+    "inspecao_visual": "Inspeção visual externa sem amassados, corrosão ou danos por fogo",
+    "valvula": "Válvula íntegra, sem vazamento e com rosca adequada ao gás",
+    "identificacao": "Rótulo e identificação do gás legíveis e corretos",
+    "cor_padrao": "Pintura na cor padrão do gás (ABNT NBR 12176)",
+    "purga_vacuo": "Purga/vácuo do resíduo realizado antes do envase",
+}
+
+
+def normalize_checklist(raw: dict[str, bool] | None) -> dict[str, bool] | None:
+    if raw is None:
+        return None
+    unknown = set(raw) - set(FILL_CHECKLIST)
+    if unknown:
+        raise ValidationFailed(f"Itens de checklist desconhecidos: {', '.join(sorted(unknown))}")
+    return {k: bool(raw.get(k, False)) for k in FILL_CHECKLIST}
+
+
+def ensure_fill_checklist(category: GasCategory, checklist: dict[str, bool] | None) -> None:
+    """Gás medicinal só é envasado com todos os itens de inspeção aprovados e registrados."""
+    if category != GasCategory.MEDICINAL:
+        return
+    if checklist is None:
+        raise ComplianceViolation("Envase medicinal exige checklist de inspeção pré-envase")
+    failed = [FILL_CHECKLIST[k] for k, ok in checklist.items() if not ok]
+    if failed:
+        raise ComplianceViolation("Inspeção pré-envase reprovada: " + "; ".join(failed))
+
+
+# ---------------- Sincronização offline ----------------
+
+OFFLINE_MAX_AGE_DAYS = 30
+OFFLINE_CLOCK_SKEW_MINUTES = 10
+
+
+def validate_client_time(client_time: datetime, server_now: datetime) -> None:
+    """Data informada pelo aparelho offline: não pode estar no futuro nem ser antiga demais."""
+    from datetime import timedelta
+    if client_time.tzinfo is None:
+        raise ValidationFailed("Data do aparelho deve conter fuso horário")
+    if client_time > server_now + timedelta(minutes=OFFLINE_CLOCK_SKEW_MINUTES):
+        raise ValidationFailed("Data do aparelho no futuro; verifique o relógio do celular")
+    if client_time < server_now - timedelta(days=OFFLINE_MAX_AGE_DAYS):
+        raise ValidationFailed(f"Registro offline com mais de {OFFLINE_MAX_AGE_DAYS} dias")
+
+
+# ---------------- Exportação segura ----------------
+
+def csv_safe(value: object) -> str:
+    """Neutraliza injeção de fórmula em planilhas (=, +, -, @, tab, CR)."""
+    s = "" if value is None else str(value)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s

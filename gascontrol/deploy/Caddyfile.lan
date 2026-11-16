@@ -1,0 +1,19 @@
+# Alternativa para rede local SEM domínio (ex.: https://192.168.0.10).
+# O Caddy cria uma autoridade certificadora própria ("tls internal"). É gratuito, mas cada
+# celular precisa instalar uma vez o certificado raiz (ver README, seção "Rede local").
+{
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+https://{$LAN_HOST} {
+	tls internal
+	encode zstd gzip
+	request_body {
+		max_size 2MB
+	}
+	@metrics path /metrics
+	respond @metrics 404
+	reverse_proxy gascontrol:8000
+}

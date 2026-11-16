@@ -1,0 +1,41 @@
+# Proxy reverso com HTTPS automático e gratuito (Let's Encrypt / ZeroSSL).
+# Requisitos: DOMAIN apontando (DNS tipo A) para o IP público do servidor e portas 80/443 liberadas.
+{
+	email {$ACME_EMAIL}
+	servers {
+		# Confia no IP real do cliente apenas quando vier do próprio Caddy (rede interna do compose).
+		trusted_proxies static private_ranges
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Limita tamanho de requisição (lote de sincronização cabe com folga).
+	request_body {
+		max_size 2MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
+
+	# /metrics só para a rede interna (Prometheus), nunca pela internet.
+	@metrics path /metrics
+	respond @metrics 404
+
+	reverse_proxy gascontrol:8000 {
+		health_uri /health
+		health_interval 15s
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 30s
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

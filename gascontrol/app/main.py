@@ -18,14 +18,14 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import Container
-from app.api.routers import auth, catalog, cylinders
+from app.api.routers import auth, catalog, cylinders, reports, sync
 from app.application.security import LoginThrottle, TokenService
 from app.application.services import (
-    AuthService, CatalogService, CylinderService, LotService, ReportService,
+    AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
 )
 from app.config import Settings, get_settings
 from app.domain.errors import DomainError
-from app.infra.db import Base, build_engine, build_session_factory
+from app.infra.db import build_engine, build_session_factory, upgrade_schema
 from app.infra.repositories import SqlUnitOfWork
 from app.observability import HTTP_LATENCY, HTTP_REQUESTS, REGISTRY, configure_logging, trace_id_var
 
@@ -41,14 +41,17 @@ SECURITY_HEADERS = {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; "
-        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        "connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; "
+        "base-uri 'none'; form-action 'self'"
     ),
 }
 
 
 def build_container(settings: Settings) -> tuple[Container, object]:
     engine = build_engine(settings.database_url)
-    Base.metadata.create_all(engine)
+    added = upgrade_schema(engine)
+    if added:
+        log.info("schema_upgraded", extra={"columns": added})
     factory = build_session_factory(engine)
 
     def uow() -> SqlUnitOfWork:
@@ -58,6 +61,7 @@ def build_container(settings: Settings) -> tuple[Container, object]:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
 
+    cylinder_service = CylinderService(uow, settings.hydro_test_validity_years)
     container = Container(
         settings=settings,
         tokens=TokenService(settings.jwt_secret, settings.jwt_ttl_minutes),
@@ -65,8 +69,9 @@ def build_container(settings: Settings) -> tuple[Container, object]:
         auth=AuthService(uow),
         catalog=CatalogService(uow),
         lots=LotService(uow),
-        cylinders=CylinderService(uow, settings.hydro_test_validity_years),
+        cylinders=cylinder_service,
         reports=ReportService(uow, settings.hydro_test_validity_years, settings.hydro_alert_days),
+        sync=SyncService(uow, cylinder_service, settings.hydro_test_validity_years),
         ping_db=ping_db,
     )
     return container, engine
@@ -171,12 +176,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(catalog.router)
     app.include_router(cylinders.router)
+    app.include_router(reports.router)
+    app.include_router(sync.router)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker() -> FileResponse:
+        # Servido na raiz para controlar todo o escopo "/" (app offline).
+        return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript",
+                            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
 
     return app
 

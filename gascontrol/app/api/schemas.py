@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
@@ -117,6 +117,7 @@ class LotIn(Strict):
 class LotDecisionIn(Strict):
     approve: bool
     notes: Notes = None
+    signature_password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
 
 class LotOut(ORM):
@@ -131,6 +132,8 @@ class LotOut(ORM):
     released_by_id: int | None
     released_at: datetime | None
     release_notes: str | None
+    signature_meaning: str | None = None
+    signature_hash: str | None = None
 
 
 class LotBrief(ORM):
@@ -183,6 +186,7 @@ class MovementIn(Strict):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     notes: Notes = None
     new_hydro_test: date | None = None
+    checklist: dict[Annotated[str, StringConstraints(max_length=40)], bool] | None = Field(default=None, max_length=20)
 
     @field_validator("type")
     @classmethod
@@ -229,6 +233,9 @@ class MovementOut(ORM):
     longitude: float | None
     notes: str | None
     occurred_at: datetime
+    client_occurred_at: datetime | None = None
+    offline: bool | None = None
+    checklist: str | None = None
     hash: str
 
 
@@ -246,3 +253,44 @@ class ErrorOut(BaseModel):
     error: str
     message: str
     trace_id: str
+
+
+UUIDStr = Annotated[str, StringConstraints(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
+
+
+class SyncMovementItem(Strict):
+    client_uuid: UUIDStr
+    kind: Literal["movement"]
+    occurred_at: datetime
+    payload: MovementIn
+
+
+class SyncExchangeItem(Strict):
+    client_uuid: UUIDStr
+    kind: Literal["exchange"]
+    occurred_at: datetime
+    payload: ExchangeIn
+
+
+class SyncBatchIn(Strict):
+    items: list[Annotated[SyncMovementItem | SyncExchangeItem, Field(discriminator="kind")]] = Field(max_length=200)
+
+
+class SyncResultOut(BaseModel):
+    client_uuid: str
+    status: Literal["ok", "duplicate", "rejected"]
+    movement_ids: list[int] | None = None
+    error: str | None = None
+    message: str | None = None
+    retryable: bool | None = None
+
+
+class AuditEventOut(ORM):
+    id: int
+    occurred_at: datetime
+    user: UserBrief | None
+    action: str
+    entity: str
+    entity_id: int | None
+    data: str
+    hash: str

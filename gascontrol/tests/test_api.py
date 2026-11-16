@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import text
 
-from tests.conftest import approved_lot, new_cylinder
+from tests.conftest import CHECKLIST_OK, PWD, approved_lot, new_cylinder
 
 
 def test_health_ready_metrics(client):
@@ -57,15 +57,20 @@ def test_medicinal_full_cycle_with_traceability(client, users, gases, customer):
         "expiry_date": (today + timedelta(days=365)).isoformat(), "analysis_report": "LA-1"}).json()
     assert lot["status"] == "QUARENTENA"
     r = client.post("/api/movements", headers=users["OPERADOR"],
-                    json={"serial": "GC1:MED-001", "type": "ENVASE", "lot_id": lot["id"]})
+                    json={"serial": "GC1:MED-001", "type": "ENVASE", "lot_id": lot["id"],
+                          "checklist": CHECKLIST_OK})
     assert r.status_code == 201, r.text
     r = client.post("/api/movements", headers=users["MOTORISTA"],
                     json={"serial": "MED-001", "type": "ENTREGA", "customer_id": customer["id"]})
     assert r.status_code == 422 and "Lote" in r.json()["message"]
 
     # operador não pode liberar lote; gestor pode
-    assert client.post(f"/api/lots/{lot['id']}/decision", headers=users["OPERADOR"], json={"approve": True}).status_code == 403
-    assert client.post(f"/api/lots/{lot['id']}/decision", headers=users["GESTOR"], json={"approve": True}).status_code == 200
+    sign = {"approve": True, "signature_password": PWD}
+    assert client.post(f"/api/lots/{lot['id']}/decision", headers=users["OPERADOR"], json=sign).status_code == 403
+    assert client.post(f"/api/lots/{lot['id']}/decision", headers=users["GESTOR"],
+                       json={**sign, "signature_password": "errada"}).status_code == 403
+    r = client.post(f"/api/lots/{lot['id']}/decision", headers=users["GESTOR"], json=sign)
+    assert r.status_code == 200 and len(r.json()["signature_hash"]) == 64
 
     r = client.post("/api/movements", headers=users["MOTORISTA"], json={
         "serial": "MED-001", "type": "ENTREGA", "customer_id": customer["id"], "is_loan": True,
@@ -161,7 +166,7 @@ def test_lot_gas_mismatch(client, users, gases):
     lot = approved_lot(client, users, gases["O2-MED"])
     new_cylinder(client, users["OPERADOR"], "AR-1", gases["AR-MED"])
     r = client.post("/api/movements", headers=users["OPERADOR"],
-                    json={"serial": "AR-1", "type": "ENVASE", "lot_id": lot["id"]})
+                    json={"serial": "AR-1", "type": "ENVASE", "lot_id": lot["id"], "checklist": CHECKLIST_OK})
     assert r.status_code == 422
 
 

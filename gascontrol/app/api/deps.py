@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.security import LoginThrottle, TokenService
 from app.application.services import (
-    Actor, AuthService, CatalogService, CylinderService, LotService, ReportService,
+    Actor, AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
 )
 from app.config import Settings
 from app.domain.rules import Role
@@ -25,6 +25,7 @@ class Container:
     lots: LotService
     cylinders: CylinderService
     reports: ReportService
+    sync: SyncService
     ping_db: object  # Callable[[], None]
 
 

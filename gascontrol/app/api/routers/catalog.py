@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status as http
 
 from app.api.deps import Container, current_actor, get_container
 from app.api.schemas import (
@@ -8,6 +8,7 @@ from app.api.schemas import (
     LotTraceOut, MovementOut,
 )
 from app.application.services import Actor
+from app.domain.errors import Forbidden
 from app.domain.rules import LotStatus
 
 router = APIRouter(prefix="/api", tags=["catálogo"])
@@ -62,7 +63,16 @@ def create_lot(body: LotIn, actor: Actor = Depends(current_actor), c: Container 
 @router.post("/lots/{lot_id}/decision", response_model=LotOut)
 def decide_lot(lot_id: int, body: LotDecisionIn, actor: Actor = Depends(current_actor),
                c: Container = Depends(get_container)):
-    return c.lots.decide(actor, lot_id, body.approve, body.notes)
+    key = f"sign|{actor.user_id}"
+    if c.throttle.is_locked(key):
+        raise HTTPException(http.HTTP_429_TOO_MANY_REQUESTS, "Assinatura bloqueada temporariamente")
+    try:
+        lot = c.lots.decide(actor, lot_id, body.approve, body.notes, body.signature_password)
+    except Forbidden:
+        c.throttle.fail(key)
+        raise
+    c.throttle.success(key)
+    return lot
 
 
 @router.get("/lots/{lot_id}/trace", response_model=LotTraceOut)

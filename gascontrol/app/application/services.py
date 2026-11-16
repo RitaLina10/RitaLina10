@@ -1,6 +1,8 @@
 """Casos de uso. Cada método = uma transação (Unit of Work)."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -10,11 +12,13 @@ from typing import Callable, Sequence
 from app.application.ports import UnitOfWork
 from app.application.security import DUMMY_HASH, hash_password, verify_password
 from app.domain import rules
-from app.domain.errors import ComplianceViolation, Conflict, Forbidden, NotFound, ValidationFailed
+from app.domain.errors import (
+    ComplianceViolation, ConcurrencyConflict, Conflict, DomainError, Forbidden, NotFound, ValidationFailed,
+)
 from app.domain.rules import (
     GENESIS_HASH, CylinderStatus, GasCategory, LotStatus, MovementType, Role,
 )
-from app.infra.orm import Customer, Cylinder, GasType, Lot, Movement, User
+from app.infra.orm import AuditEvent, Customer, Cylinder, GasType, Lot, Movement, SyncReceipt, User
 from app.observability import DOMAIN_REJECTIONS, MOVEMENTS
 
 log = logging.getLogger("gascontrol.services")
@@ -52,6 +56,31 @@ class MovementInput:
     longitude: float | None = None
     notes: str | None = None
     new_hydro_test: date | None = None
+    checklist: dict[str, bool] | None = None
+    client_occurred_at: datetime | None = None
+    offline: bool = False
+
+
+@dataclass(frozen=True)
+class ExchangeInput:
+    full_serial: str
+    empty_serial: str
+    customer_id: int
+    is_loan: bool = False
+    document_ref: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    notes: str | None = None
+    client_occurred_at: datetime | None = None
+    offline: bool = False
+
+
+@dataclass(frozen=True)
+class SyncItem:
+    client_uuid: str
+    kind: str  # "movement" | "exchange"
+    movement: MovementInput | None = None
+    exchange: ExchangeInput | None = None
 
 
 def _require_role(actor: Actor, *roles: Role) -> None:
@@ -60,7 +89,7 @@ def _require_role(actor: Actor, *roles: Role) -> None:
 
 
 def _hash_payload(m: Movement) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "operation_id": m.operation_id, "cylinder_id": m.cylinder_id, "type": str(m.type),
         "from": str(m.from_status) if m.from_status else None, "to": str(m.to_status),
         "customer_id": m.customer_id, "lot_id": m.lot_id, "user_id": m.user_id,
@@ -69,6 +98,30 @@ def _hash_payload(m: Movement) -> dict[str, object]:
         "lon": None if m.longitude is None else f"{float(m.longitude):.6f}",
         "notes": m.notes, "occurred_at": _naive_utc(m.occurred_at).isoformat(timespec="microseconds"),
     }
+    # Campos adicionados depois: só entram no hash quando presentes (compatível com cadeias antigas).
+    if m.client_occurred_at is not None:
+        payload["client_occurred_at"] = _naive_utc(m.client_occurred_at).isoformat(timespec="microseconds")
+    if m.offline:
+        payload["offline"] = True
+    if m.checklist:
+        payload["checklist"] = m.checklist
+    return payload
+
+
+def _audit(uow: UnitOfWork, user_id: int | None, action: str, entity: str, entity_id: int | None,
+           data: dict[str, object], now: datetime) -> None:
+    """Registra evento de cadastro na trilha global encadeada (mesma transação da alteração)."""
+    prev = uow.audit.last_hash() or GENESIS_HASH
+    body = json.dumps(data, sort_keys=True, default=str, ensure_ascii=False)
+    ev = AuditEvent(occurred_at=_naive_utc(now), user_id=user_id, action=action, entity=entity,
+                    entity_id=entity_id, data=body, prev_hash=prev)
+    ev.hash = rules.movement_hash(prev, _audit_payload(ev))
+    uow.audit.add(ev)
+
+
+def _audit_payload(ev: AuditEvent) -> dict[str, object]:
+    return {"at": _naive_utc(ev.occurred_at).isoformat(timespec="microseconds"), "user_id": ev.user_id,
+            "action": ev.action, "entity": ev.entity, "entity_id": ev.entity_id, "data": ev.data}
 
 
 class AuthService:
@@ -83,6 +136,11 @@ class AuthService:
                 verify_password(password, DUMMY_HASH)  # tempo constante
                 return None
             return user if verify_password(password, user.password_hash) else None
+
+    def verify_signature(self, user_id: int, password: str) -> bool:
+        with self._uow() as uow:
+            u = uow.users.get(user_id)
+            return bool(u and u.active and verify_password(password, u.password_hash))
 
     def get_active_user(self, user_id: int) -> User | None:
         with self._uow() as uow:
@@ -99,6 +157,9 @@ class AuthService:
             user = User(email=email, name=name.strip(), password_hash=hash_password(password),
                         role=role, active=True, created_at=self._clock())
             uow.users.add(user)
+            uow.flush()
+            _audit(uow, actor.user_id if actor else None, "CRIAR", "usuario", user.id,
+                   {"email": email, "role": str(role)}, self._clock())
             uow.commit()
             log.info("user_created", extra={"user_id": user.id, "role": str(role)})
             return user
@@ -117,6 +178,7 @@ class AuthService:
             if not u:
                 raise NotFound("Usuário não encontrado")
             u.active = active
+            _audit(uow, actor.user_id, "ATIVAR" if active else "DESATIVAR", "usuario", u.id, {}, self._clock())
             uow.commit()
             return u
 
@@ -170,6 +232,8 @@ class CatalogService:
                 raise Conflict("Código de gás já existe")
             g = GasType(code=code, name=name.strip(), category=category)
             uow.gas_types.add(g)
+            uow.flush()
+            _audit(uow, actor.user_id, "CRIAR", "gas", g.id, {"code": code, "category": str(category)}, self._clock())
             uow.commit()
             return g
 
@@ -184,6 +248,8 @@ class CatalogService:
             c = Customer(name=name.strip(), document=doc, phone=phone, address=address,
                          is_health_facility=is_health_facility, active=True, created_at=self._clock())
             uow.customers.add(c)
+            uow.flush()
+            _audit(uow, actor.user_id, "CRIAR", "cliente", c.id, {"name": c.name, "document": doc}, self._clock())
             uow.commit()
             return c
 
@@ -194,9 +260,15 @@ class CatalogService:
             c = uow.customers.get(customer_id)
             if not c:
                 raise NotFound("Cliente não encontrado")
+            changes: dict[str, object] = {}
             for k, v in fields.items():
                 if k in allowed and v is not None:
-                    setattr(c, k, v.strip() if isinstance(v, str) else v)
+                    new = v.strip() if isinstance(v, str) else v
+                    if getattr(c, k) != new:
+                        changes[k] = {"de": getattr(c, k), "para": new}
+                        setattr(c, k, new)
+            if changes:
+                _audit(uow, actor.user_id, "ALTERAR", "cliente", c.id, changes, self._clock())
             uow.commit()
             return c
 
@@ -233,14 +305,22 @@ class LotService:
                       analysis_report=analysis_report, status=LotStatus.QUARENTENA,
                       created_at=self._clock())
             uow.lots.add(lot)
+            uow.flush()
+            _audit(uow, actor.user_id, "CRIAR", "lote", lot.id,
+                   {"code": code, "gas_type_id": gas_type_id, "expiry": expiry_date.isoformat(),
+                    "analysis_report": analysis_report}, self._clock())
             uow.commit()
             uow.refresh(lot)
             return lot
 
-    def decide(self, actor: Actor, lot_id: int, approve: bool, notes: str | None) -> Lot:
-        """Liberação pelo responsável técnico (GESTOR). Exige laudo para gás medicinal."""
+    def decide(self, actor: Actor, lot_id: int, approve: bool, notes: str | None, password: str) -> Lot:
+        """Liberação pelo responsável técnico (GESTOR) com assinatura eletrônica (reautenticação)."""
         _require_role(actor, Role.GESTOR)
         with self._uow() as uow:
+            signer = uow.users.get(actor.user_id)
+            if signer is None or not verify_password(password, signer.password_hash):
+                log.warning("signature_failed", extra={"user_id": actor.user_id, "lot_id": lot_id})
+                raise Forbidden("Assinatura eletrônica inválida: senha incorreta")
             lot = uow.lots.get(lot_id)
             if not lot:
                 raise NotFound("Lote não encontrado")
@@ -248,10 +328,21 @@ class LotService:
                 raise Conflict(f"Lote já decidido ({lot.status})")
             if approve and lot.gas_type.category == GasCategory.MEDICINAL and not lot.analysis_report:
                 raise ComplianceViolation("Lote medicinal exige número do laudo de análise para aprovação")
+            now = self._clock()
             lot.status = LotStatus.APROVADO if approve else LotStatus.REPROVADO
             lot.released_by_id = actor.user_id
-            lot.released_at = self._clock()
+            lot.released_at = now
             lot.release_notes = notes
+            meaning = ("Aprovo a liberação deste lote para uso" if approve
+                       else "Reprovo este lote; uso proibido")
+            lot.signature_meaning = f"{signer.name} <{signer.email}>: {meaning}"
+            lot.signature_hash = hashlib.sha256(json.dumps({
+                "lot": lot.code, "gas": lot.gas_type_id, "expiry": lot.expiry_date.isoformat(),
+                "report": lot.analysis_report, "status": str(lot.status), "signer": signer.id,
+                "meaning": lot.signature_meaning, "at": _naive_utc(now).isoformat(), "notes": notes,
+            }, sort_keys=True).encode()).hexdigest()
+            _audit(uow, actor.user_id, "ASSINAR_" + str(lot.status), "lote", lot.id,
+                   {"code": lot.code, "signature_hash": lot.signature_hash, "notes": notes}, now)
             uow.commit()
             log.info("lot_decided", extra={"lot_id": lot.id, "status": str(lot.status)})
             return lot
@@ -306,6 +397,9 @@ class CylinderService:
             uow.flush()
             self._append(uow, cyl, MovementType.CADASTRO, None, CylinderStatus.VAZIO,
                          str(uuid.uuid4()), actor, now, notes="Cadastro inicial")
+            _audit(uow, actor.user_id, "CRIAR", "cilindro", cyl.id,
+                   {"serial": serial, "gas_type_id": gas_type_id, "last_hydro_test": last_hydro_test.isoformat()},
+                   now)
             uow.commit()
             uow.refresh(cyl)
             log.info("cylinder_registered", extra={"cylinder_id": cyl.id, "serial": serial})
@@ -346,20 +440,27 @@ class CylinderService:
                  is_loan: bool, document_ref: str | None, latitude: float | None,
                  longitude: float | None, notes: str | None) -> tuple[Movement, Movement]:
         """Troca: entrega um cheio e coleta um vazio do mesmo cliente em uma única transação."""
-        if rules.normalize_serial(full_serial) == rules.normalize_serial(empty_serial):
-            raise ValidationFailed("Cilindro cheio e vazio devem ser diferentes")
-        op = str(uuid.uuid4())
-        common = dict(customer_id=customer_id, document_ref=document_ref, latitude=latitude,
-                      longitude=longitude, notes=notes)
         with self._uow() as uow:
-            collected = self._apply(uow, actor, MovementInput(serial=empty_serial, type=MovementType.COLETA,
-                                                              **common), op)
-            delivered = self._apply(uow, actor, MovementInput(serial=full_serial, type=MovementType.ENTREGA,
-                                                              is_loan=is_loan, **common), op)
+            delivered, collected = self._exchange_in(uow, actor, ExchangeInput(
+                full_serial=full_serial, empty_serial=empty_serial, customer_id=customer_id, is_loan=is_loan,
+                document_ref=document_ref, latitude=latitude, longitude=longitude, notes=notes))
             uow.commit()
             uow.refresh(delivered)
             uow.refresh(collected)
             return delivered, collected
+
+    def _exchange_in(self, uow: UnitOfWork, actor: Actor, x: "ExchangeInput") -> tuple[Movement, Movement]:
+        if rules.normalize_serial(x.full_serial) == rules.normalize_serial(x.empty_serial):
+            raise ValidationFailed("Cilindro cheio e vazio devem ser diferentes")
+        op = str(uuid.uuid4())
+        common = dict(customer_id=x.customer_id, document_ref=x.document_ref, latitude=x.latitude,
+                      longitude=x.longitude, notes=x.notes, client_occurred_at=x.client_occurred_at,
+                      offline=x.offline)
+        collected = self._apply(uow, actor, MovementInput(serial=x.empty_serial, type=MovementType.COLETA,
+                                                          **common), op)
+        delivered = self._apply(uow, actor, MovementInput(serial=x.full_serial, type=MovementType.ENTREGA,
+                                                          is_loan=x.is_loan, **common), op)
+        return delivered, collected
 
     def _apply(self, uow: UnitOfWork, actor: Actor, d: MovementInput, op: str) -> Movement:
         try:
@@ -388,6 +489,8 @@ class CylinderService:
 
         if d.type == MovementType.ENVASE:
             rules.ensure_hydro_valid(cyl.last_hydro_test, self._hydro_years, today)
+            checklist = rules.normalize_checklist(d.checklist)
+            rules.ensure_fill_checklist(GasCategory(cyl.gas_type.category), checklist)
             if cyl.gas_type.category == GasCategory.MEDICINAL and d.lot_id is None:
                 raise ComplianceViolation("Envase de gás medicinal exige lote (rastreabilidade ANVISA)")
             if d.lot_id is not None:
@@ -434,11 +537,16 @@ class CylinderService:
                 raise ValidationFailed("Condenação exige justificativa")
             cyl.current_lot_id = None
 
+        if d.client_occurred_at is not None:
+            rules.validate_client_time(d.client_occurred_at, now)
+        checklist_json = (json.dumps(rules.normalize_checklist(d.checklist), sort_keys=True)
+                          if d.type == MovementType.ENVASE and d.checklist is not None else None)
         cyl.status = target
         m = self._append(uow, cyl, d.type, current, target, op, actor, now, customer_id=customer_id,
                          lot_id=lot_id, is_loan=d.is_loan if d.type == MovementType.ENTREGA else False,
                          document_ref=d.document_ref, latitude=d.latitude, longitude=d.longitude,
-                         notes=d.notes)
+                         notes=d.notes, client_occurred_at=d.client_occurred_at, offline=d.offline,
+                         checklist=checklist_json)
         MOVEMENTS.labels(type=str(d.type)).inc()
         log.info("movement_recorded", extra={"cylinder": cyl.serial, "type": str(d.type),
                                              "from": str(current), "to": str(target),
@@ -461,11 +569,15 @@ class CylinderService:
                 to_s: CylinderStatus, op: str, actor: Actor, now: datetime, *,
                 customer_id: int | None = None, lot_id: int | None = None, is_loan: bool = False,
                 document_ref: str | None = None, latitude: float | None = None,
-                longitude: float | None = None, notes: str | None = None) -> Movement:
+                longitude: float | None = None, notes: str | None = None,
+                client_occurred_at: datetime | None = None, offline: bool = False,
+                checklist: str | None = None) -> Movement:
         m = Movement(operation_id=op, cylinder_id=cyl.id, type=mtype, from_status=from_s, to_status=to_s,
                      customer_id=customer_id, lot_id=lot_id, user_id=actor.user_id, is_loan=is_loan,
                      document_ref=document_ref, latitude=latitude, longitude=longitude, notes=notes,
-                     occurred_at=_naive_utc(now), prev_hash=cyl.last_hash)
+                     occurred_at=_naive_utc(now), prev_hash=cyl.last_hash,
+                     client_occurred_at=_naive_utc(client_occurred_at) if client_occurred_at else None,
+                     offline=offline, checklist=checklist)
         m.hash = rules.movement_hash(m.prev_hash, _hash_payload(m))
         cyl.last_hash = m.hash
         uow.movements.add(m)
@@ -527,4 +639,92 @@ class ReportService:
                 cyl = uow.cylinders.get(cid)
                 if chain_ok and cyl is not None and cyl.last_hash != prev:
                     broken.append({"cylinder_id": cid, "movement_id": None})
-        return {"ok": not broken, "movements_checked": total, "broken": broken}
+            audit_prev = GENESIS_HASH
+            audit_total = 0
+            audit_broken: int | None = None
+            for ev in uow.audit.all_ordered():
+                audit_total += 1
+                if ev.prev_hash != audit_prev or ev.hash != rules.movement_hash(audit_prev, _audit_payload(ev)):
+                    audit_broken = ev.id
+                    break
+                audit_prev = ev.hash
+        return {"ok": not broken and audit_broken is None, "movements_checked": total, "broken": broken,
+                "audit_events_checked": audit_total, "audit_broken_event_id": audit_broken}
+
+    def audit_events(self, entity: str | None, limit: int, offset: int) -> Sequence[AuditEvent]:
+        with self._uow() as uow:
+            return uow.audit.list(entity, limit, offset)
+
+
+class SyncService:
+    """Recebe operações feitas offline no celular. Cada item: transação própria + idempotência."""
+
+    MAX_BATCH = 200
+
+    def __init__(self, uow: UowFactory, cylinders: CylinderService, hydro_years: int,
+                 clock: Clock = utcnow) -> None:
+        self._uow = uow
+        self._cyl = cylinders
+        self._hydro_years = hydro_years
+        self._clock = clock
+
+    def process_batch(self, actor: Actor, items: Sequence[SyncItem]) -> list[dict[str, object]]:
+        if len(items) > self.MAX_BATCH:
+            raise ValidationFailed(f"Lote de sincronização acima de {self.MAX_BATCH} itens")
+        # Ordem cronológica real do campo (ex.: entrega antes da coleta do mesmo cilindro).
+        ordered = sorted(items, key=lambda i: (self._when(i) or self._clock()))
+        return [self._process_one(actor, item) for item in ordered]
+
+    @staticmethod
+    def _when(item: SyncItem) -> datetime | None:
+        src = item.movement or item.exchange
+        return src.client_occurred_at if src else None
+
+    def _process_one(self, actor: Actor, item: SyncItem) -> dict[str, object]:
+        base: dict[str, object] = {"client_uuid": item.client_uuid}
+        try:
+            with self._uow() as uow:
+                receipt = uow.receipts.get(item.client_uuid)
+                if receipt is not None:
+                    if receipt.user_id != actor.user_id:
+                        raise Conflict("Identificador de operação já usado por outro usuário")
+                    return {**base, "status": "duplicate",
+                            "movement_ids": [int(x) for x in receipt.movement_ids.split(",")]}
+                if item.kind == "movement" and item.movement is not None:
+                    moves = [self._cyl._apply(uow, actor, item.movement, str(uuid.uuid4()))]
+                elif item.kind == "exchange" and item.exchange is not None:
+                    moves = list(self._cyl._exchange_in(uow, actor, item.exchange))
+                else:
+                    raise ValidationFailed("Tipo de item de sincronização inválido")
+                uow.receipts.add(SyncReceipt(client_uuid=item.client_uuid, user_id=actor.user_id,
+                                             kind=item.kind, movement_ids=",".join(str(m.id) for m in moves),
+                                             created_at=self._clock()))
+                uow.commit()
+                log.info("sync_item_applied", extra={"client_uuid": item.client_uuid, "kind": item.kind})
+                return {**base, "status": "ok", "movement_ids": [m.id for m in moves]}
+        except ConcurrencyConflict as e:
+            return {**base, "status": "rejected", "error": e.code, "message": e.message, "retryable": True}
+        except DomainError as e:
+            return {**base, "status": "rejected", "error": e.code, "message": e.message, "retryable": False}
+
+    def snapshot(self, max_cylinders: int = 20000) -> dict[str, object]:
+        """Dados de referência para o app operar offline (pré-validação local)."""
+        today = self._clock().date()
+        with self._uow() as uow:
+            lots = [l for l in uow.lots.list(None, 500, 0) if l.status != LotStatus.REPROVADO]
+            return {
+                "server_time": self._clock().isoformat(),
+                "checklist": rules.FILL_CHECKLIST,
+                "gas_types": [{"id": g.id, "code": g.code, "name": g.name, "category": str(g.category)}
+                              for g in uow.gas_types.list()],
+                "customers": [{"id": c.id, "name": c.name, "document": c.document}
+                              for c in uow.customers.search(None, 5000, 0) if c.active],
+                "lots": [{"id": l.id, "code": l.code, "gas_type_id": l.gas_type_id, "status": str(l.status),
+                          "expiry_date": l.expiry_date.isoformat()} for l in lots],
+                "cylinders": [{
+                    "serial": c.serial, "status": str(c.status), "gas_type_id": c.gas_type_id,
+                    "category": str(c.gas_type.category), "customer_id": c.current_customer_id,
+                    "lot_id": c.current_lot_id,
+                    "hydro_expired": rules.hydro_due_date(c.last_hydro_test, self._hydro_years) < today,
+                } for c in uow.cylinders.all_active(max_cylinders)],
+            }

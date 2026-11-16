@@ -9,9 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.domain.errors import Conflict
+from app.domain.errors import ConcurrencyConflict
 from app.domain.rules import CylinderStatus, LotStatus
-from app.infra.orm import Customer, Cylinder, GasType, Lot, Movement, User
+from app.infra.orm import AuditEvent, Customer, Cylinder, GasType, Lot, Movement, SyncReceipt, User
 
 
 def _like(q: str) -> str:
@@ -156,6 +156,11 @@ class SqlCylinderRepository:
         ).all()
         return [(cid, name, int(total), int(loans or 0)) for cid, name, total, loans in rows]
 
+    def all_active(self, limit: int) -> Sequence[Cylinder]:
+        stmt = (select(Cylinder).where(Cylinder.status != CylinderStatus.CONDENADO)
+                .order_by(Cylinder.serial).limit(limit))
+        return self.s.scalars(stmt).unique().all()
+
     def by_lot(self, lot_id: int) -> Sequence[Cylinder]:
         return self.s.scalars(select(Cylinder).where(Cylinder.current_lot_id == lot_id)).unique().all()
 
@@ -188,6 +193,37 @@ class SqlMovementRepository:
         return self.s.scalars(select(Cylinder.id).order_by(Cylinder.id)).all()
 
 
+class SqlReceiptRepository:
+    def __init__(self, s: Session) -> None:
+        self.s = s
+
+    def get(self, client_uuid: str) -> SyncReceipt | None:
+        return self.s.get(SyncReceipt, client_uuid)
+
+    def add(self, receipt: SyncReceipt) -> None:
+        self.s.add(receipt)
+
+
+class SqlAuditRepository:
+    def __init__(self, s: Session) -> None:
+        self.s = s
+
+    def last_hash(self) -> str | None:
+        return self.s.scalar(select(AuditEvent.hash).order_by(AuditEvent.id.desc()).limit(1))
+
+    def add(self, event: AuditEvent) -> None:
+        self.s.add(event)
+
+    def list(self, entity: str | None, limit: int, offset: int) -> Sequence[AuditEvent]:
+        stmt = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit).offset(offset)
+        if entity:
+            stmt = stmt.where(AuditEvent.entity == entity)
+        return self.s.scalars(stmt).unique().all()
+
+    def all_ordered(self) -> Sequence[AuditEvent]:
+        return self.s.scalars(select(AuditEvent).order_by(AuditEvent.id)).unique().all()
+
+
 class SqlUnitOfWork:
     """Transação única por caso de uso. Converte erros de concorrência/integridade em Conflict."""
 
@@ -203,6 +239,8 @@ class SqlUnitOfWork:
         self.lots = SqlLotRepository(s)
         self.cylinders = SqlCylinderRepository(s)
         self.movements = SqlMovementRepository(s)
+        self.receipts = SqlReceiptRepository(s)
+        self.audit = SqlAuditRepository(s)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
@@ -215,20 +253,20 @@ class SqlUnitOfWork:
             self.session.flush()
         except StaleDataError as e:
             self.session.rollback()
-            raise Conflict("Registro alterado por outra operação; refaça a leitura") from e
+            raise ConcurrencyConflict("Registro alterado por outra operação; tente novamente") from e
         except IntegrityError as e:
             self.session.rollback()
-            raise Conflict("Violação de unicidade/integridade") from e
+            raise ConcurrencyConflict("Conflito de gravação simultânea ou duplicidade; tente novamente") from e
 
     def commit(self) -> None:
         try:
             self.session.commit()
         except StaleDataError as e:
             self.session.rollback()
-            raise Conflict("Registro alterado por outra operação; refaça a leitura") from e
+            raise ConcurrencyConflict("Registro alterado por outra operação; tente novamente") from e
         except IntegrityError as e:
             self.session.rollback()
-            raise Conflict("Violação de unicidade/integridade") from e
+            raise ConcurrencyConflict("Conflito de gravação simultânea ou duplicidade; tente novamente") from e
 
     def rollback(self) -> None:
         self.session.rollback()

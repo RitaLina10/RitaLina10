@@ -1,22 +1,65 @@
+# Produção: Caddy (HTTPS gratuito) -> GasControl. A aplicação não fica exposta diretamente.
 services:
   gascontrol:
     build: .
-    image: gascontrol:1.0.0
+    image: gascontrol:2.0.0
     env_file: .env
-    ports:
-      - "127.0.0.1:8000:8000"   # exponha via proxy reverso com TLS, não diretamente
+    environment:
+      # O app só é alcançável pela rede interna do compose (sem "ports"), então
+      # confiar nos cabeçalhos X-Forwarded-* do Caddy é seguro.
+      FORWARDED_ALLOW_IPS: "*"
+    expose: ["8000"]
     volumes:
       - gascontrol-data:/data
     read_only: true
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    networks: [internal]
     deploy:
       resources:
         limits: { cpus: "1.0", memory: 512M }
 
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on: [gascontrol]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env}
+      ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
+      LAN_HOST: ${LAN_HOST:-localhost}
+    volumes:
+      - ./deploy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # certificados: NÃO apague (limite de emissão do Let's Encrypt)
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    networks: [internal]
+
+  backup:
+    image: gascontrol:2.0.0
+    depends_on: [gascontrol]
+    env_file: .env
+    entrypoint: ["python", "-m", "app.tools.backup", "--loop", "--dest", "/backups"]
+    volumes:
+      - gascontrol-data:/data:ro
+      - ./backups:/backups
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    networks: [internal]
+
 volumes:
   gascontrol-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:

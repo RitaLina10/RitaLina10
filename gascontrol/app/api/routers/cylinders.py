@@ -17,6 +17,11 @@ router = APIRouter(prefix="/api", tags=["cilindros"])
 QR_PREFIX = "GC1:"  # payload opaco: não é URL, evita phishing via QR adulterado
 
 
+def to_movement_input(body: MovementIn, client_time=None, offline: bool = False) -> MovementInput:  # noqa: ANN001
+    return MovementInput(**{**body.model_dump(), "serial": body.serial.removeprefix(QR_PREFIX),
+                            "client_occurred_at": client_time, "offline": offline})
+
+
 def _out(c: Container, cyl) -> CylinderOut:  # noqa: ANN001
     out = CylinderOut.model_validate(cyl)
     out.hydro_due_date = c.cylinders.hydro_due_date(cyl)
@@ -62,7 +67,7 @@ def qr(serial: str, _: Actor = Depends(current_actor), c: Container = Depends(ge
 
 @router.post("/movements", response_model=MovementOut, status_code=201)
 def move(body: MovementIn, actor: Actor = Depends(current_actor), c: Container = Depends(get_container)):
-    data = MovementInput(**{**body.model_dump(), "serial": body.serial.removeprefix(QR_PREFIX)})
+    data = to_movement_input(body)
     return c.cylinders.move(actor, data)
 
 

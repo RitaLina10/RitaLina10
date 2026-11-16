@@ -5,7 +5,7 @@ from datetime import date
 from typing import Protocol, Sequence
 
 from app.domain.rules import CylinderStatus, LotStatus
-from app.infra.orm import Customer, Cylinder, GasType, Lot, Movement, User
+from app.infra.orm import AuditEvent, Customer, Cylinder, GasType, Lot, Movement, SyncReceipt, User
 
 
 class UserRepository(Protocol):
@@ -48,6 +48,7 @@ class CylinderRepository(Protocol):
     def hydro_due_before(self, last_test_cutoff: date) -> Sequence[Cylinder]: ...
     def balance_by_customer(self) -> list[tuple[int, str, int, int]]: ...
     def by_lot(self, lot_id: int) -> Sequence[Cylinder]: ...
+    def all_active(self, limit: int) -> Sequence[Cylinder]: ...
 
 
 class MovementRepository(Protocol):
@@ -59,6 +60,18 @@ class MovementRepository(Protocol):
     def all_cylinder_ids(self) -> Sequence[int]: ...
 
 
+class ReceiptRepository(Protocol):
+    def get(self, client_uuid: str) -> SyncReceipt | None: ...
+    def add(self, receipt: SyncReceipt) -> None: ...
+
+
+class AuditRepository(Protocol):
+    def last_hash(self) -> str | None: ...
+    def add(self, event: AuditEvent) -> None: ...
+    def list(self, entity: str | None, limit: int, offset: int) -> Sequence[AuditEvent]: ...
+    def all_ordered(self) -> Sequence[AuditEvent]: ...
+
+
 class UnitOfWork(Protocol):
     users: UserRepository
     gas_types: GasTypeRepository
@@ -66,6 +79,8 @@ class UnitOfWork(Protocol):
     lots: LotRepository
     cylinders: CylinderRepository
     movements: MovementRepository
+    receipts: ReceiptRepository
+    audit: AuditRepository
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...

@@ -21,6 +21,12 @@ class Conflict(DomainError):
     http_status = 409
 
 
+class ConcurrencyConflict(Conflict):
+    """Corrida entre operações simultâneas; seguro tentar novamente."""
+
+    code = "concurrency_conflict"
+
+
 class InvalidTransition(DomainError):
     code = "invalid_transition"
 
