@@ -1,0 +1,22 @@
+services:
+  gascontrol:
+    build: .
+    image: gascontrol:1.0.0
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"   # exponha via proxy reverso com TLS, não diretamente
+    volumes:
+      - gascontrol-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+volumes:
+  gascontrol-data:

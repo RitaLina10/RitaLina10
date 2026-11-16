@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GasControl — Gestão de Cilindros</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<section id="login-view" class="center hidden">
+  <form id="login-form" class="card narrow" autocomplete="on">
+    <h1>GasControl</h1>
+    <p class="muted">Gestão e rastreabilidade de gases industriais e medicinais</p>
+    <label>E-mail <input name="email" type="email" required maxlength="254" autocomplete="username"></label>
+    <label>Senha <input name="password" type="password" required maxlength="128" autocomplete="current-password"></label>
+    <button type="submit">Entrar</button>
+    <p id="login-error" class="error" role="alert"></p>
+  </form>
+</section>
+
+<div id="app-view" class="hidden">
+  <header class="topbar">
+    <strong>GasControl</strong>
+    <nav id="nav"></nav>
+    <span id="who" class="muted"></span>
+    <button id="logout" class="ghost" type="button">Sair</button>
+  </header>
+  <main id="main"></main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+"""Container de dependências e autenticação/autorização por papel."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import jwt
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from app.application.security import LoginThrottle, TokenService
+from app.application.services import (
+    Actor, AuthService, CatalogService, CylinderService, LotService, ReportService,
+)
+from app.config import Settings
+from app.domain.rules import Role
+
+
+@dataclass
+class Container:
+    settings: Settings
+    tokens: TokenService
+    throttle: LoginThrottle
+    auth: AuthService
+    catalog: CatalogService
+    lots: LotService
+    cylinders: CylinderService
+    reports: ReportService
+    ping_db: object  # Callable[[], None]
+
+
+def get_container(request: Request) -> Container:
+    return request.app.state.container
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def current_actor(creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+                  c: Container = Depends(get_container)) -> Actor:
+    unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "Não autenticado",
+                                 headers={"WWW-Authenticate": "Bearer"})
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise unauthorized
+    try:
+        payload = c.tokens.decode(creds.credentials)
+        user_id = int(str(payload["sub"]))
+    except (jwt.PyJWTError, KeyError, ValueError):
+        raise unauthorized from None
+    # Revalida no banco: usuário desativado ou com papel alterado perde acesso imediatamente.
+    user = c.auth.get_active_user(user_id)
+    if user is None:
+        raise unauthorized
+    return Actor(user_id=user.id, role=Role(user.role))
+
+
+def require(*roles: Role):
+    def _dep(actor: Actor = Depends(current_actor)) -> Actor:
+        if actor.role != Role.ADMIN and actor.role not in roles:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Perfil sem permissão")
+        return actor
+    return _dep
