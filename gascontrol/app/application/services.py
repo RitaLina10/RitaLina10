@@ -83,6 +83,19 @@ class SyncItem:
     exchange: ExchangeInput | None = None
 
 
+def _verify_signer(uow: UnitOfWork, actor: Actor, password: str) -> User:
+    """Assinatura eletrônica: reautentica o usuário no ato (senha), dentro da mesma transação."""
+    signer = uow.users.get(actor.user_id)
+    if signer is None or not signer.active or not verify_password(password or "", signer.password_hash):
+        log.warning("signature_failed", extra={"user_id": actor.user_id})
+        raise Forbidden("Assinatura eletrônica inválida: senha incorreta")
+    return signer
+
+
+def _signature_hash(payload: dict[str, object]) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def _require_role(actor: Actor, *roles: Role) -> None:
     if actor.role != Role.ADMIN and actor.role not in roles:
         raise Forbidden("Perfil sem permissão para esta operação")
@@ -238,15 +251,30 @@ class CatalogService:
             return g
 
     # ---- clientes ----
+    ADDRESS_FIELDS = frozenset({"email", "state_registration", "street", "street_number", "complement",
+                                "district", "city", "uf", "cep"})
+
+    @staticmethod
+    def _norm_address(fields: dict[str, object]) -> dict[str, object]:
+        out = dict(fields)
+        if out.get("cep"):
+            out["cep"] = rules.normalize_document(str(out["cep"]))
+        if out.get("uf"):
+            out["uf"] = str(out["uf"]).upper()
+        if out.get("email"):
+            out["email"] = str(out["email"]).lower()
+        return out
+
     def create_customer(self, actor: Actor, name: str, document: str, phone: str | None,
-                        address: str | None, is_health_facility: bool) -> Customer:
+                        address: str | None, is_health_facility: bool, **extra: object) -> Customer:
         _require_role(actor, Role.GESTOR, Role.OPERADOR)
         doc = rules.validate_document(document)
+        extra = self._norm_address({k: v for k, v in extra.items() if k in self.ADDRESS_FIELDS and v})
         with self._uow() as uow:
             if uow.customers.get_by_document(doc):
                 raise Conflict("Cliente com este CPF/CNPJ já existe")
             c = Customer(name=name.strip(), document=doc, phone=phone, address=address,
-                         is_health_facility=is_health_facility, active=True, created_at=self._clock())
+                         is_health_facility=is_health_facility, active=True, created_at=self._clock(), **extra)
             uow.customers.add(c)
             uow.flush()
             _audit(uow, actor.user_id, "CRIAR", "cliente", c.id, {"name": c.name, "document": doc}, self._clock())
@@ -255,7 +283,8 @@ class CatalogService:
 
     def update_customer(self, actor: Actor, customer_id: int, **fields: object) -> Customer:
         _require_role(actor, Role.GESTOR, Role.OPERADOR)
-        allowed = {"name", "phone", "address", "is_health_facility", "active"}
+        allowed = {"name", "phone", "address", "is_health_facility", "active"} | self.ADDRESS_FIELDS
+        fields = self._norm_address(fields)
         with self._uow() as uow:
             c = uow.customers.get(customer_id)
             if not c:

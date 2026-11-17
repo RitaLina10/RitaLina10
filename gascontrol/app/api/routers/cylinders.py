@@ -90,7 +90,7 @@ def recent(customer_id: int | None = Query(default=None, gt=0), mine: bool = Fal
 
 @router.get("/dashboard")
 def dashboard(_: Actor = Depends(require(Role.GESTOR, Role.OPERADOR)), c: Container = Depends(get_container)):
-    return c.reports.dashboard()
+    return {**c.reports.dashboard(), "quality": c.quality.summary(), "fiscal": c.fiscal.summary()}
 
 
 @router.get("/audit/verify")

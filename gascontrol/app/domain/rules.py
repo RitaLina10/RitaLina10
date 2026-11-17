@@ -44,6 +44,7 @@ class LotStatus(StrEnum):
     QUARENTENA = "QUARENTENA"
     APROVADO = "APROVADO"
     REPROVADO = "REPROVADO"
+    BLOQUEADO = "BLOQUEADO"   # suspenso por ocorrência de qualidade (recall); reversível pelo RT
 
 
 # Máquina de estados: tipo -> (estados de origem permitidos, estado destino)
@@ -115,15 +116,17 @@ def ensure_lot_usable_for_fill(lot_status: LotStatus, lot_gas_type_id: int, cyl_
                                lot_expiry: date, today: date) -> None:
     if lot_gas_type_id != cyl_gas_type_id:
         raise ComplianceViolation("Gás do lote diferente do gás do cilindro")
-    if lot_status == LotStatus.REPROVADO:
-        raise ComplianceViolation("Lote reprovado não pode ser usado em envase")
+    if lot_status in (LotStatus.REPROVADO, LotStatus.BLOQUEADO):
+        raise ComplianceViolation(f"Lote {lot_status.lower()} não pode ser usado em envase")
     if lot_expiry < today:
         raise ComplianceViolation("Lote com validade expirada")
 
 
 def ensure_lot_releasable_for_delivery(category: GasCategory, lot_status: LotStatus | None,
                                        lot_expiry: date | None, today: date) -> None:
-    """Gás medicinal só sai para o cliente com lote APROVADO e dentro da validade."""
+    """Gás medicinal só sai com lote APROVADO e válido. Lote BLOQUEADO (recall) não sai, qualquer gás."""
+    if lot_status in (LotStatus.BLOQUEADO, LotStatus.REPROVADO):
+        raise ComplianceViolation(f"Lote {lot_status.lower()}; entrega bloqueada")
     if category != GasCategory.MEDICINAL:
         return
     if lot_status is None or lot_expiry is None:

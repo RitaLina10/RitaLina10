@@ -7,6 +7,8 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.application.fiscal_service import FiscalService
+from app.application.quality_service import QualityService
 from app.application.security import LoginThrottle, TokenService
 from app.application.services import (
     Actor, AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
@@ -26,6 +28,8 @@ class Container:
     cylinders: CylinderService
     reports: ReportService
     sync: SyncService
+    quality: QualityService
+    fiscal: FiscalService
     ping_db: object  # Callable[[], None]
 
 

@@ -44,3 +44,10 @@ class ValidationFailed(DomainError):
 class Forbidden(DomainError):
     code = "forbidden"
     http_status = 403
+
+
+class ExternalServiceError(DomainError):
+    """Serviço externo indisponível (ex.: emissor de NF-e). Nada foi enviado."""
+
+    code = "external_service_unavailable"
+    http_status = 503

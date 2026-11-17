@@ -38,8 +38,9 @@ def customer(customer_id: int, _: Actor = Depends(current_actor), c: Container =
 
 @router.post("/customers", response_model=CustomerOut, status_code=201)
 def create_customer(body: CustomerIn, actor: Actor = Depends(current_actor), c: Container = Depends(get_container)):
+    extra = body.model_dump(exclude={"name", "document", "phone", "address", "is_health_facility"})
     return c.catalog.create_customer(actor, body.name, body.document, body.phone, body.address,
-                                     body.is_health_facility)
+                                     body.is_health_facility, **extra)
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerOut)

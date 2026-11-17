@@ -6,6 +6,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
+from decimal import Decimal
+
+from app.domain.fiscal import InvoiceStatus
+from app.domain.quality import ActionStatus, ActionType, OccurrenceStatus, OccurrenceType, Severity
 from app.domain.rules import CylinderStatus, GasCategory, LotStatus, MovementType, Role
 
 Str120 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
@@ -83,6 +87,16 @@ class CustomerIn(Strict):
                                                    pattern=r"^[0-9()+\- ]*$")] = None
     address: OptStr = None
     is_health_facility: bool = False
+    email: EmailStr | None = None
+    state_registration: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=20,
+                                                                pattern=r"^([0-9.\-/]+|ISENTO)$")] = None
+    street: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
+    street_number: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=20)] = None
+    complement: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    district: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    city: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    uf: Annotated[str | None, StringConstraints(strip_whitespace=True, to_upper=True, pattern=r"^[A-Za-z]{2}$")] = None
+    cep: Annotated[str | None, StringConstraints(strip_whitespace=True, pattern=r"^\d{5}-?\d{3}$")] = None
 
 
 class CustomerPatch(Strict):
@@ -92,6 +106,16 @@ class CustomerPatch(Strict):
     address: OptStr = None
     is_health_facility: bool | None = None
     active: bool | None = None
+    email: EmailStr | None = None
+    state_registration: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=20,
+                                                                pattern=r"^([0-9.\-/]+|ISENTO)$")] = None
+    street: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
+    street_number: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=20)] = None
+    complement: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    district: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    city: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=60)] = None
+    uf: Annotated[str | None, StringConstraints(strip_whitespace=True, to_upper=True, pattern=r"^[A-Za-z]{2}$")] = None
+    cep: Annotated[str | None, StringConstraints(strip_whitespace=True, pattern=r"^\d{5}-?\d{3}$")] = None
 
 
 class CustomerOut(ORM):
@@ -102,6 +126,15 @@ class CustomerOut(ORM):
     address: str | None
     is_health_facility: bool
     active: bool
+    email: str | None = None
+    state_registration: str | None = None
+    street: str | None = None
+    street_number: str | None = None
+    complement: str | None = None
+    district: str | None = None
+    city: str | None = None
+    uf: str | None = None
+    cep: str | None = None
 
 
 # ---- lotes ----
@@ -294,3 +327,175 @@ class AuditEventOut(ORM):
     entity_id: int | None
     data: str
     hash: str
+
+
+# ---- qualidade / CAPA ----
+LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=5000)]
+Password = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+class OccurrenceIn(Strict):
+    kind: OccurrenceType
+    severity: Severity
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=160)]
+    description: LongText
+    customer_id: int | None = Field(default=None, gt=0)
+    lot_id: int | None = Field(default=None, gt=0)
+    serial: ScannedSerial | None = None
+
+
+class InvestigateIn(Strict):
+    owner_id: int | None = Field(default=None, gt=0)
+
+
+class RootCauseIn(Strict):
+    root_cause: LongText
+
+
+class ActionIn(Strict):
+    kind: ActionType
+    description: LongText
+    responsible_id: int = Field(gt=0)
+    due_date: date
+
+
+class EvidenceIn(Strict):
+    evidence: LongText
+
+
+class ReasonIn(Strict):
+    reason: LongText
+
+
+class SignedTextIn(Strict):
+    text: LongText
+    signature_password: Password
+
+
+class SignatureIn(Strict):
+    signature_password: Password
+
+
+class ActionOut(ORM):
+    id: int
+    kind: ActionType
+    description: str
+    responsible: UserBrief
+    due_date: date
+    status: ActionStatus
+    evidence: str | None
+    completed_at: datetime | None
+
+
+class OccurrenceOut(ORM):
+    id: int
+    code: str
+    kind: OccurrenceType
+    severity: Severity
+    status: OccurrenceStatus
+    title: str
+    description: str
+    customer: CustomerBrief | None
+    lot: LotBrief | None
+    cylinder: CylinderBrief | None
+    reported_by: UserBrief
+    owner: UserBrief | None
+    opened_at: datetime
+    due_date: date
+    root_cause: str | None
+    effectiveness_check: str | None
+    closed_at: datetime | None
+    closing_signature_hash: str | None
+    lot_blocked: bool | None
+    actions: list[ActionOut]
+
+
+# ---- fiscal ----
+Money = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=4)]
+
+
+class FiscalProfileIn(Strict):
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=120)]
+    ncm: Annotated[str, StringConstraints(pattern=r"^\d{4}\.?\d{2}\.?\d{2}$")]
+    cfop_internal: Annotated[str, StringConstraints(pattern=r"^\d{4}$")]
+    cfop_interstate: Annotated[str, StringConstraints(pattern=r"^\d{4}$")]
+    unit: Annotated[str, StringConstraints(to_upper=True, max_length=6)]
+    icms_cst: Annotated[str, StringConstraints(pattern=r"^\d{2,3}$")]
+    icms_rate: Annotated[Decimal, Field(ge=0, le=100, decimal_places=2)] = Decimal(0)
+    pis_cst: Annotated[str, StringConstraints(pattern=r"^\d{2}$")]
+    cofins_cst: Annotated[str, StringConstraints(pattern=r"^\d{2}$")]
+    origin: int = Field(default=0, ge=0, le=8)
+    default_price: Money | None = None
+
+
+class FiscalProfileOut(ORM):
+    gas_type: GasTypeOut
+    description: str
+    ncm: str
+    cfop_internal: str
+    cfop_interstate: str
+    unit: str
+    icms_cst: str
+    icms_rate: Decimal
+    pis_cst: str
+    cofins_cst: str
+    origin: int
+    default_price: Decimal | None
+
+
+class InvoiceItemIn(Strict):
+    gas_type_id: int = Field(gt=0)
+    quantity: Money
+    unit_price: Money | None = None
+    description: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
+
+
+class InvoiceIn(Strict):
+    customer_id: int = Field(gt=0)
+    nature: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=60)] = "Venda de mercadoria"
+    items: list[InvoiceItemIn] = Field(min_length=1, max_length=50)
+    notes: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=2000)] = None
+
+
+class InvoiceUpdateIn(Strict):
+    nature: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=60)]
+    items: list[InvoiceItemIn] = Field(min_length=1, max_length=50)
+    notes: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=2000)] = None
+
+
+class FromOperationIn(Strict):
+    operation_id: UUIDStr
+
+
+class CancelInvoiceIn(Strict):
+    justification: Annotated[str, StringConstraints(strip_whitespace=True, min_length=15, max_length=255)]
+    signature_password: Password
+
+
+class InvoiceItemOut(ORM):
+    gas_type: GasTypeOut
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    total: Decimal
+
+
+class InvoiceOut(ORM):
+    id: int
+    ref: str
+    customer: CustomerBrief
+    status: InvoiceStatus
+    nature: str
+    operation_id: str | None
+    notes: str | None
+    total: Decimal
+    access_key: str | None
+    number: str | None
+    series: str | None
+    danfe_url: str | None
+    xml_url: str | None
+    provider_message: str | None
+    authorized_at: datetime | None
+    cancel_justification: str | None
+    created_at: datetime
+    items: list[InvoiceItemOut]

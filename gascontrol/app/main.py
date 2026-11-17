@@ -1,6 +1,7 @@
 """Composition root: monta dependências, middlewares, rotas e frontend estático."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import re
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +20,10 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import Container
-from app.api.routers import auth, catalog, cylinders, reports, sync
+from app.api.routers import auth, catalog, cylinders, fiscal, quality, reports, sync
+from app.application.fiscal_service import FiscalService
+from app.application.ports import FiscalGateway
+from app.application.quality_service import QualityService
 from app.application.security import LoginThrottle, TokenService
 from app.application.services import (
     AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
@@ -26,6 +31,7 @@ from app.application.services import (
 from app.config import Settings, get_settings
 from app.domain.errors import DomainError
 from app.infra.db import build_engine, build_session_factory, upgrade_schema
+from app.infra.fiscal_gateway import DisabledFiscalGateway, FocusNFeGateway
 from app.infra.repositories import SqlUnitOfWork
 from app.observability import HTTP_LATENCY, HTTP_REQUESTS, REGISTRY, configure_logging, trace_id_var
 
@@ -47,7 +53,15 @@ SECURITY_HEADERS = {
 }
 
 
-def build_container(settings: Settings) -> tuple[Container, object]:
+def build_fiscal_gateway(settings: Settings) -> FiscalGateway:
+    if settings.fiscal_provider == "focusnfe":
+        if not settings.focus_token or not settings.emitter_cnpj:
+            raise RuntimeError("FISCAL_PROVIDER=focusnfe exige FOCUS_TOKEN e EMITTER_CNPJ")
+        return FocusNFeGateway(settings.focus_token, settings.focus_environment, settings.emitter_cnpj)
+    return DisabledFiscalGateway()
+
+
+def build_container(settings: Settings, fiscal_gateway: FiscalGateway | None = None) -> tuple[Container, object]:
     engine = build_engine(settings.database_url)
     added = upgrade_schema(engine)
     if added:
@@ -72,22 +86,39 @@ def build_container(settings: Settings) -> tuple[Container, object]:
         cylinders=cylinder_service,
         reports=ReportService(uow, settings.hydro_test_validity_years, settings.hydro_alert_days),
         sync=SyncService(uow, cylinder_service, settings.hydro_test_validity_years),
+        quality=QualityService(uow),
+        fiscal=FiscalService(uow, fiscal_gateway or build_fiscal_gateway(settings), settings.emitter_cnpj,
+                             settings.emitter_uf, settings.fiscal_cancel_hours),
         ping_db=ping_db,
     )
     return container, engine
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
-    container, engine = build_container(settings)
+    container, engine = build_container(settings, fiscal_gateway)
+
+    async def fiscal_poller() -> None:
+        """Resolve notas em PROCESSANDO (resposta da SEFAZ é assíncrona)."""
+        while True:
+            await asyncio.sleep(settings.fiscal_poll_seconds)
+            try:
+                await run_in_threadpool(container.fiscal.poll_processing)
+            except Exception:
+                log.exception("fiscal_poll_failed")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         container.catalog.seed_gas_types()
         container.auth.bootstrap_admin(settings.admin_email, settings.admin_password)
-        log.info("startup", extra={"env": settings.env})
+        log.info("startup", extra={"env": settings.env, "fiscal": container.fiscal.provider})
+        poller = None
+        if settings.fiscal_poll_seconds > 0 and container.fiscal.provider != "desativado":
+            poller = asyncio.create_task(fiscal_poller())
         yield
+        if poller:
+            poller.cancel()
         engine.dispose()  # type: ignore[attr-defined]
         log.info("shutdown")
 
@@ -178,6 +209,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(cylinders.router)
     app.include_router(reports.router)
     app.include_router(sync.router)
+    app.include_router(quality.router)
+    app.include_router(fiscal.router)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

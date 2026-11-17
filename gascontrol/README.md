@@ -20,6 +20,9 @@ Sistema próprio que cobre o núcleo funcional de soluções como Oryx Place, SA
 | Dossiê para fiscalização | CSV do lote (recall) e do histórico do cilindro |
 | HTTPS gratuito | Caddy com certificado Let's Encrypt automático |
 | Backup automático | A cada 6 h, com verificação de integridade e rotação |
+| **Qualidade / CAPA** | Reclamações, desvios, não conformidades e eventos adversos com prazo por gravidade, causa raiz, ações corretivas/preventivas com evidência, verificação de eficácia e encerramento assinado |
+| **Recall com bloqueio** | O gestor bloqueia o lote a partir da ocorrência: envase e entrega param na hora. O lote só volta pela quarentena, com nova liberação assinada |
+| **NF-e** | Perfis fiscais por gás, "Faturar" direto da entrega/troca, emissão via Focus NFe, consulta automática da SEFAZ, DANFE/XML e cancelamento assinado |
 | Perfis | ADMIN, GESTOR, OPERADOR, MOTORISTA |
 
 ## Arquitetura
@@ -104,6 +107,46 @@ Como funciona:
 
 Limite: a leitura de QR pela câmera usa a API nativa `BarcodeDetector` (Chrome/Android). No iPhone, use um leitor Bluetooth ou digite a série.
 
+## Qualidade (CAPA)
+
+```mermaid
+stateDiagram-v2
+  [*] --> ABERTA: qualquer usuário registra (inclusive motorista)
+  ABERTA --> EM_INVESTIGACAO: gestor define responsável
+  EM_INVESTIGACAO --> AGUARDANDO_EFICACIA: causa raiz + ações concluídas com evidência
+  AGUARDANDO_EFICACIA --> EM_INVESTIGACAO: ineficaz (motivo)
+  AGUARDANDO_EFICACIA --> ENCERRADA: eficácia comprovada + assinatura
+  ABERTA --> CANCELADA: justificativa + assinatura
+  EM_INVESTIGACAO --> CANCELADA: justificativa + assinatura
+```
+
+- **Prazos de investigação**: crítica 2 dias, alta 7, média 15, baixa 30. Atrasos aparecem no painel.
+- **Evento adverso** é sempre classificado no mínimo como ALTA. Não conformidade e evento adverso exigem lote ou cilindro. O lote é herdado do cilindro.
+- **Recall**: "Bloquear lote" (assinado) muda o lote para BLOQUEADO, e nenhum envase ou entrega desse lote passa. Para encerrar a ocorrência, o lote precisa voltar à QUARENTENA, e aí o responsável técnico decide de novo: aprova ou reprova, com assinatura.
+- O motorista vê apenas as ocorrências que ele mesmo abriu.
+
+## NF-e
+
+1. **Perfis fiscais** (Fiscal → Configurar): NCM, CFOP interno/interestadual, CST/CSOSN, alíquota, PIS/COFINS e preço padrão por gás. **Quem define é o contador.**
+2. **Endereço fiscal do cliente** (Clientes → Endereço fiscal): logradouro, número, bairro, município, UF, CEP e IE.
+3. **Faturar**: em Movimentações, o botão "Faturar" de uma entrega gera o rascunho (um item por gás, quantidade = nº de cilindros, preço padrão). Edite e clique em "Emitir NF-e".
+4. O sistema escolhe o CFOP sozinho (interno ou interestadual, pela UF do cliente). A nota fica em PROCESSANDO e a consulta automática traz a autorização, a chave, o número e os links do DANFE e do XML.
+5. **Cancelamento**: com assinatura e justificativa de 15 a 255 caracteres, dentro do prazo (`FISCAL_CANCEL_HOURS`, padrão 24 h).
+
+Robustez:
+- A nota é gravada como PROCESSANDO **antes** do envio.
+- Se a resposta se perder, a consulta pela referência resolve. O envio nunca é repetido às cegas, então não há risco de nota em duplicidade.
+- Se o emissor recusar a nota, a correção vai com uma nova referência.
+- Timeout de 20 s, até 3 novas tentativas nas consultas, e circuit breaker após 5 falhas.
+- Links de DANFE/XML só são aceitos do domínio do próprio emissor.
+
+**Antes de produção**:
+- Contrate o Focus NFe (serviço pago, cobrado por nota) e cadastre o certificado A1 da empresa no painel deles.
+- Rode em `FOCUS_ENVIRONMENT=homologacao` e emita notas de teste com o contador.
+- O mapeamento de campos está todo em `app/infra/fiscal_gateway.py`. Confira com a documentação oficial (doc.focusnfe.com.br), principalmente os campos da Reforma Tributária (IBS/CBS).
+
+Limite: a remessa de **cilindro em comodato** (CFOP 5908/6908, NCM do recipiente) ainda não tem perfil próprio. Por ora, emita essa nota no sistema do contador.
+
 ## Estrutura
 
 ```
@@ -116,11 +159,14 @@ gascontrol/
 │   ├── application/{services,ports,security}.py
 │   ├── infra/{db,orm,repositories}.py
 │   ├── api/{schemas,deps}.py
-│   ├── api/routers/{auth,catalog,cylinders,sync,reports}.py
+│   ├── domain/{quality,fiscal}.py   # regras de CAPA e fiscais
+│   ├── application/{quality_service,fiscal_service}.py
+│   ├── infra/fiscal_gateway.py      # adaptador Focus NFe + circuit breaker
+│   ├── api/routers/{auth,catalog,cylinders,sync,reports,quality,fiscal}.py
 │   ├── tools/backup.py        # backup online do SQLite com rotação
 │   └── static/                # SPA + sw.js + db.js (IndexedDB) + manifest
 ├── deploy/Caddyfile(.lan)     # proxy HTTPS
-├── tests/                     # 32 testes: domínio, API, offline, conformidade
+├── tests/                     # 41 testes: domínio, API, offline, conformidade, CAPA, NF-e
 ├── CONFORMIDADE.md            # matriz regulatória
 ├── Dockerfile  docker-compose.yml  .env.example
 └── requirements*.txt
@@ -214,8 +260,10 @@ Métricas: `gascontrol_http_requests_total`, `gascontrol_http_request_duration_s
 | Injeção em planilha (CSV) | Células iniciadas por `= + - @` são neutralizadas |
 | Exposição do app | Só o Caddy publica portas; `/metrics` bloqueado na internet |
 
+| Chamadas ao emissor fiscal | Timeout, circuit breaker, nenhuma repetição automática de emissão, links validados por domínio |
+| Escopo de ocorrências | Motorista só acessa as próprias (404 para as demais, sem revelar que existem) |
+
 ### Limites conhecidos
 
-- Não emite NF-e (só guarda a referência). A integração com SEFAZ/ERP fiscal seria o próximo passo.
-- Reclamações/desvios (CAPA) ainda não estão no sistema.
+- Remessa de cilindro em comodato ainda não é emitida pelo sistema.
 - Ver `CONFORMIDADE.md` para o que depende de processo da empresa.

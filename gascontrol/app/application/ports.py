@@ -1,11 +1,17 @@
 """Portas (interfaces) que a camada de aplicação exige da infraestrutura."""
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Protocol, Sequence
 
+from app.domain.fiscal import InvoiceStatus
 from app.domain.rules import CylinderStatus, LotStatus
-from app.infra.orm import AuditEvent, Customer, Cylinder, GasType, Lot, Movement, SyncReceipt, User
+from app.infra.orm import (
+    AuditEvent, CapaAction, Customer, Cylinder, FiscalProfile, GasType, Invoice, Lot, Movement, Occurrence,
+    SyncReceipt, User,
+)
 
 
 class UserRepository(Protocol):
@@ -57,6 +63,7 @@ class MovementRepository(Protocol):
     def for_lot(self, lot_id: int) -> Sequence[Movement]: ...
     def recent(self, limit: int, offset: int, customer_id: int | None,
                user_id: int | None) -> Sequence[Movement]: ...
+    def by_operation(self, operation_id: str) -> Sequence[Movement]: ...
     def all_cylinder_ids(self) -> Sequence[int]: ...
 
 
@@ -72,6 +79,33 @@ class AuditRepository(Protocol):
     def all_ordered(self) -> Sequence[AuditEvent]: ...
 
 
+class QualityRepository(Protocol):
+    def get(self, occurrence_id: int) -> Occurrence | None: ...
+    def add(self, occ: Occurrence) -> None: ...
+    def add_action(self, action: CapaAction) -> None: ...
+    def get_action(self, action_id: int) -> CapaAction | None: ...
+    def next_sequence(self, year: int) -> int: ...
+    def search(self, status: str | None, reported_by_id: int | None, lot_id: int | None,
+               limit: int, offset: int) -> Sequence[Occurrence]: ...
+    def open_summary(self) -> dict[str, int]: ...
+    def overdue_occurrences(self, today: date) -> Sequence[Occurrence]: ...
+    def overdue_actions(self, today: date) -> Sequence[CapaAction]: ...
+    def open_blocking_lot(self, lot_id: int, exclude_id: int) -> int: ...
+
+
+class FiscalRepository(Protocol):
+    def get_profile(self, gas_type_id: int) -> FiscalProfile | None: ...
+    def list_profiles(self) -> Sequence[FiscalProfile]: ...
+    def add_profile(self, profile: FiscalProfile) -> None: ...
+    def get(self, invoice_id: int) -> Invoice | None: ...
+    def add(self, invoice: Invoice) -> None: ...
+    def search(self, status: InvoiceStatus | None, customer_id: int | None, limit: int,
+               offset: int) -> Sequence[Invoice]: ...
+    def by_operation(self, operation_id: str) -> Sequence[Invoice]: ...
+    def processing_ids(self, limit: int) -> Sequence[int]: ...
+    def count_by_status(self) -> dict[str, int]: ...
+
+
 class UnitOfWork(Protocol):
     users: UserRepository
     gas_types: GasTypeRepository
@@ -81,6 +115,8 @@ class UnitOfWork(Protocol):
     movements: MovementRepository
     receipts: ReceiptRepository
     audit: AuditRepository
+    quality: QualityRepository
+    fiscal: FiscalRepository
 
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, *exc: object) -> None: ...
@@ -88,3 +124,69 @@ class UnitOfWork(Protocol):
     def rollback(self) -> None: ...
     def flush(self) -> None: ...
     def refresh(self, obj: object) -> None: ...
+
+
+# ---------------- Emissor fiscal (provedor externo de NF-e) ----------------
+
+@dataclass(frozen=True)
+class FiscalParty:
+    document: str
+    name: str
+    state_registration: str | None
+    email: str | None
+    street: str
+    number: str
+    complement: str | None
+    district: str
+    city: str
+    uf: str
+    cep: str
+
+
+@dataclass(frozen=True)
+class FiscalLine:
+    number: int
+    code: str
+    description: str
+    ncm: str
+    cfop: str
+    unit: str
+    quantity: Decimal
+    unit_price: Decimal
+    total: Decimal
+    icms_cst: str
+    icms_rate: Decimal
+    pis_cst: str
+    cofins_cst: str
+    origin: int
+
+
+@dataclass(frozen=True)
+class FiscalDocument:
+    ref: str
+    nature: str
+    issued_at: datetime
+    customer: FiscalParty
+    lines: tuple[FiscalLine, ...]
+    total: Decimal
+    notes: str | None
+
+
+@dataclass(frozen=True)
+class FiscalResult:
+    """Status neutro: processing | authorized | rejected | cancelled | not_found."""
+    status: str
+    access_key: str | None = None
+    number: str | None = None
+    series: str | None = None
+    danfe_url: str | None = None
+    xml_url: str | None = None
+    message: str | None = None
+
+
+class FiscalGateway(Protocol):
+    name: str
+
+    def emit(self, doc: FiscalDocument) -> FiscalResult: ...
+    def query(self, ref: str) -> FiscalResult: ...
+    def cancel(self, ref: str, justification: str) -> FiscalResult: ...

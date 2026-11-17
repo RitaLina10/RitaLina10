@@ -26,15 +26,17 @@
 | Contemporaneidade (quando fez) | Grava a hora do servidor **e** a hora do campo (operação offline), com GPS e NF-e/romaneio | Movimentações |
 | Trilha de alterações de cadastro | Cada criação ou alteração de usuário, cliente, lote, gás e cilindro gera evento com antes e depois | Auditoria |
 | Disponibilidade para inspeção | Exportação CSV do dossiê de lote e do histórico do cilindro (protegida contra injeção de fórmula) | Lotes / Cilindros |
+| Reclamações, desvios e CAPA | Registro com prazo por gravidade, investigação com causa raiz, ações com responsável/prazo/evidência, verificação de eficácia e encerramento assinado | Qualidade |
+| Recolhimento (recall) | Bloqueio do lote a partir da ocorrência (assinado). Envase e entrega param na hora. O dossiê CSV lista os clientes atingidos. A volta exige nova liberação do RT | Qualidade + Lotes |
 | Preservação dos registros | Backup automático a cada 6 h, com verificação de integridade e hash (`backup` no docker-compose) | Operação de TI |
 
 ## O que **não** se resolve só com software (responsabilidade da empresa)
 
 1. **Licenciamento**: AFE/AE na ANVISA, licença sanitária local, CBPDA quando aplicável, e o RT habilitado no conselho profissional.
 2. **POPs escritos** que reflitam o uso do sistema: recebimento, envase, inspeção, liberação, expedição, recall, reclamações, calibração e limpeza.
-3. **Validação do sistema computadorizado**: um documento que prove que o sistema faz o que deve. Os 32 testes automatizados (`pytest`) servem de evidência de teste (OQ). Falta o plano de validação, os requisitos do usuário e o relatório assinado pelo RT.
+3. **Validação do sistema computadorizado**: um documento que prove que o sistema faz o que deve. Os 41 testes automatizados (`pytest`) servem de evidência de teste (OQ). Falta o plano de validação, os requisitos do usuário e o relatório assinado pelo RT.
 4. **Treinamento registrado** de cada usuário antes de receber acesso.
-5. **Gestão de reclamações e desvios** (CAPA). Ainda não está no sistema; é a próxima entrega sugerida.
+5. **Comunicação à autoridade sanitária**: queixas técnicas e eventos adversos podem exigir notificação no sistema oficial da ANVISA. O GasControl registra e investiga, mas não envia a notificação.
 6. **Análise do produto**: o sistema registra o laudo, mas não substitui o controle de qualidade.
 7. **Cópia de segurança fora do servidor**: copie a pasta `backups/` para outro local, como nuvem ou disco externo. Teste a restauração periodicamente.
 
@@ -45,6 +47,6 @@
 | Semana 1 | Criar um usuário por pessoa (nada de login compartilhado). Definir quem é GESTOR/RT | Admin |
 | Semana 1 | Escrever o POP "Uso do GasControl" (envase com checklist, liberação assinada, entrega/coleta, uso offline) | RT |
 | Semana 2 | Cadastrar o parque de cilindros com a data real do último teste hidrostático | Operação |
-| Semana 2 | Simular um recall: escolher um lote, exportar o dossiê e conferir se todos os clientes aparecem | RT |
+| Semana 2 | Simular um recall: abrir uma ocorrência, bloquear o lote, exportar o dossiê, conferir os clientes e devolver o lote à quarentena | RT |
 | Semana 3 | Documento de validação: requisitos → teste → evidência (os testes automatizados e os prints) | RT + TI |
 | Mensal | Rodar "Verificar agora" na tela Auditoria e restaurar um backup em teste | TI |

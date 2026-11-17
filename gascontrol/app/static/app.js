@@ -327,6 +327,8 @@ const VIEWS = {
   clientes: { label: "Clientes", roles: ["GESTOR", "OPERADOR", "MOTORISTA"], render: viewCustomers },
   lotes: { label: "Lotes", roles: ["GESTOR", "OPERADOR"], render: viewLots },
   historico: { label: "Movimentações", roles: ["GESTOR", "OPERADOR", "MOTORISTA"], render: viewMovements },
+  qualidade: { label: "Qualidade", roles: ["GESTOR", "OPERADOR", "MOTORISTA"], render: viewQuality },
+  fiscal: { label: "Fiscal", roles: ["GESTOR", "OPERADOR"], render: viewFiscal },
   auditoria: { label: "Auditoria", roles: ["GESTOR"], render: viewAudit },
   usuarios: { label: "Usuários", roles: [], render: viewUsers },
 };
@@ -349,7 +351,13 @@ async function viewDashboard(main) {
       h("div", { class: "card" }, h("h2", {}, "Estoque por gás"),
         table(["Gás", "Status", "Qtd"], d.by_gas.map((r) => [r.gas, badge(r.status), r.count]))),
       h("div", { class: "card" }, h("h2", {}, "Lotes aguardando liberação"),
-        table(["Lote", "Gás"], d.lots_in_quarantine.map((l) => [l.code, l.gas])))),
+        table(["Lote", "Gás"], d.lots_in_quarantine.map((l) => [l.code, l.gas]))),
+      h("div", { class: "card" }, h("h2", {}, "Qualidade — ocorrências abertas"),
+        table(["Gravidade", "Qtd"], Object.entries(d.quality.open_by_severity).map(([k, v]) => [badge(k), v])),
+        h("p", { class: d.quality.overdue_occurrences.length || d.quality.overdue_actions.length ? "error" : "muted" },
+          `${d.quality.overdue_occurrences.length} ocorrência(s) e ${d.quality.overdue_actions.length} ação(ões) atrasadas`)),
+      h("div", { class: "card" }, h("h2", {}, "Notas fiscais"),
+        table(["Status", "Qtd"], Object.entries(d.fiscal).map(([k, v]) => [badge(k), v])))),
     h("p", { class: "muted" }, `Atualizado em ${fmtDT(d.generated_at)}`));
 }
 
@@ -551,11 +559,27 @@ async function viewCustomers(main) {
   const render = async () => {
     const rows = await api("/api/customers?limit=200");
     list.replaceChildren(table(["Nome", "CPF/CNPJ", "Telefone", "Estab. saúde", "Ativo", ""],
-      rows.map((c) => [c.name, c.document, c.phone || "—", c.is_health_facility ? "Sim" : "Não", c.active ? "Sim" : "Não",
-        h("button", { class: "sm ghost", onclick: guard(async () => {
-          const cyl = await api(`/api/cylinders?customer_id=${c.id}&limit=500`);
-          toast(`${c.name}: ${cyl.length} cilindro(s) em posse — ${cyl.map((r) => r.serial).join(", ") || "nenhum"}`);
-        }) }, "Saldo")])));
+      rows.map((c) => [c.name, c.document, c.city ? `${c.city}/${c.uf}` : "—", c.is_health_facility ? "Sim" : "Não", c.active ? "Sim" : "Não",
+        h("span", {},
+          h("button", { class: "sm ghost", onclick: guard(async () => {
+            const cyl = await api(`/api/cylinders?customer_id=${c.id}&limit=500`);
+            toast(`${c.name}: ${cyl.length} cilindro(s) em posse — ${cyl.map((r) => r.serial).join(", ") || "nenhum"}`);
+          }) }, "Saldo"), " ",
+          roleIs("GESTOR", "OPERADOR") ? h("button", { class: "sm ghost", onclick: () => editCustomer(c) }, "Endereço fiscal") : null)])));
+  };
+  const editor = h("div");
+  const editCustomer = (c) => {
+    const form = h("form", { class: "card", onsubmit: guard(async (ev) => {
+      const body = formData(ev.target);
+      for (const k of Object.keys(body)) if (body[k] === "") delete body[k];
+      await api(`/api/customers/${c.id}`, { method: "PATCH", body });
+      toast("Endereço fiscal atualizado");
+      form.remove();
+      await render();
+    }) }, h("h2", {}, `Endereço fiscal — ${c.name}`), ...addressFields(c),
+      h("button", { type: "submit" }, "Salvar"), " ", h("button", { type: "button", class: "ghost", onclick: () => form.remove() }, "Fechar"));
+    editor.replaceChildren(form);
+    form.scrollIntoView({ behavior: "smooth" });
   };
   if (roleIs("GESTOR", "OPERADOR")) {
     main.append(h("form", { class: "card", onsubmit: guard(async (ev) => {
@@ -569,12 +593,26 @@ async function viewCustomers(main) {
         h("label", {}, "Nome / Razão social", h("input", { name: "name", required: true, maxlength: 160 })),
         h("label", {}, "CPF / CNPJ", h("input", { name: "document", required: true, maxlength: 20 })),
         h("label", {}, "Telefone", h("input", { name: "phone", maxlength: 30 }))),
-      h("label", {}, "Endereço", h("input", { name: "address", maxlength: 300 })),
+      ...addressFields(),
       h("label", {}, h("input", { type: "checkbox", name: "is_health_facility" }), "Estabelecimento de saúde / home care"),
       h("button", { type: "submit" }, "Salvar")));
   }
-  main.append(h("div", { class: "card" }, list));
+  main.append(editor, h("div", { class: "card" }, list));
   await render();
+}
+
+function addressFields(c = {}) {
+  const f = (name, label, attrs = {}) => h("label", {}, label, h("input", { name, value: c[name] || null, ...attrs }));
+  return [
+    h("div", { class: "row" },
+      f("street", "Logradouro", { maxlength: 120 }), f("street_number", "Número", { maxlength: 20 }),
+      f("complement", "Complemento", { maxlength: 60 }), f("district", "Bairro", { maxlength: 60 })),
+    h("div", { class: "row" },
+      f("city", "Município", { maxlength: 60 }), f("uf", "UF", { maxlength: 2, pattern: "[A-Za-z]{2}" }),
+      f("cep", "CEP", { maxlength: 9, pattern: "\\d{5}-?\\d{3}" }),
+      f("state_registration", "Inscrição estadual (ou ISENTO)", { maxlength: 20 }),
+      f("email", "E-mail (envio da NF-e)", { type: "email", maxlength: 254 })),
+  ];
 }
 
 async function viewLots(main) {
@@ -642,10 +680,16 @@ async function viewLots(main) {
 async function viewMovements(main) {
   const rows = await api("/api/movements?limit=200");
   main.append(h("div", { class: "card" }, h("h2", {}, roleIs("GESTOR", "OPERADOR") ? "Últimas movimentações" : "Minhas movimentações"),
-    table(["Data", "Operação", "Cilindro", "De → Para", "Cliente", "Lote", "Usuário", "Doc.", "Origem"],
+    table(["Data", "Operação", "Cilindro", "De → Para", "Cliente", "Lote", "Usuário", "Doc.", "Origem", ""],
       rows.map((m) => [fmtDT(m.client_occurred_at || m.occurred_at), m.type, m.cylinder.serial, `${m.from_status || "—"} → ${m.to_status}`,
         m.customer ? m.customer.name : "—", m.lot ? m.lot.code : "—", m.user.name, m.document_ref || "—",
-        m.offline ? "offline" : "online"]))));
+        m.offline ? "offline" : "online",
+        m.type === "ENTREGA" && roleIs("GESTOR", "OPERADOR") ? h("button", { class: "sm ghost", onclick: guard(async () => {
+          const inv = await api("/api/fiscal/invoices/from-operation", { method: "POST", body: { operation_id: m.operation_id } });
+          toast(`Rascunho de NF-e criado (${brl(inv.total)})`);
+          state.openInvoice = inv.id;
+          go("fiscal");
+        }) }, "Faturar") : ""]))));
 }
 
 async function viewAudit(main) {
@@ -781,3 +825,294 @@ if ("serviceWorker" in navigator) {
     $("#login-view").classList.remove("hidden");
   }
 })();
+
+
+// ---------------- Qualidade (reclamações, desvios, CAPA) ----------------
+const KINDS = { RECLAMACAO: "Reclamação de cliente", DESVIO: "Desvio de processo", NAO_CONFORMIDADE: "Não conformidade de produto/cilindro", EVENTO_ADVERSO: "Evento adverso (paciente/usuário)" };
+const SEVERITIES = ["BAIXA", "MEDIA", "ALTA", "CRITICA"];
+
+function signedForm(title, { textLabel = null, textRequired = true, button = "Assinar", danger = false, onSubmit }) {
+  const form = h("form", { class: "sig", onsubmit: guard(async (ev) => {
+    const f = formData(ev.target);
+    await onSubmit(f);
+    form.remove();
+  }) },
+    h("h2", {}, title),
+    h("p", { class: "muted" }, `Assinatura eletrônica de ${state.me.name}: confirme sua senha.`),
+    textLabel ? h("label", {}, textLabel, h("textarea", { name: "text", rows: 3, minlength: 10, maxlength: 5000, required: textRequired })) : null,
+    h("label", {}, "Senha", h("input", { name: "signature_password", type: "password", required: true, autocomplete: "current-password" })),
+    h("button", { type: "submit", class: danger ? "danger" : "" }, button), " ",
+    h("button", { type: "button", class: "ghost", onclick: () => form.remove() }, "Cancelar"));
+  return form;
+}
+
+function simpleForm(title, fields, button, onSubmit) {
+  const form = h("form", { class: "sig", onsubmit: guard(async (ev) => { await onSubmit(formData(ev.target)); form.remove(); }) },
+    h("h2", {}, title), ...fields, h("button", { type: "submit" }, button), " ",
+    h("button", { type: "button", class: "ghost", onclick: () => form.remove() }, "Cancelar"));
+  return form;
+}
+
+async function viewQuality(main) {
+  const manager = roleIs("GESTOR");
+  const staff = roleIs("GESTOR", "OPERADOR");
+  const users = manager ? await api("/api/users").then((u) => u.filter((x) => x.active)) : [];
+  const lots = staff ? await api("/api/lots?limit=200") : [];
+  const list = h("div");
+  const detail = h("div");
+  let filter = "ABERTAS";
+
+  const load = async () => {
+    const rows = await api(`/api/quality/occurrences?limit=300${filter ? "&status=" + filter : ""}`);
+    const today = new Date().toISOString().slice(0, 10);
+    list.replaceChildren(table(["Código", "Tipo", "Gravidade", "Título", "Status", "Prazo", ""],
+      rows.map((o) => [o.code, KINDS[o.kind], badge(o.severity), o.title, badge(o.status),
+        ["ENCERRADA", "CANCELADA"].includes(o.status) ? fmtDate(o.due_date)
+          : (o.due_date < today ? h("span", { class: "badge s-VENCIDO" }, fmtDate(o.due_date)) : fmtDate(o.due_date)),
+        h("button", { class: "sm ghost", onclick: guard(() => show(o.id)) }, "Abrir")])));
+  };
+
+  const show = async (id) => {
+    const o = await api(`/api/quality/occurrences/${id}`);
+    const open = ["ABERTA", "EM_INVESTIGACAO", "AGUARDANDO_EFICACIA"].includes(o.status);
+    const slot = h("div");
+    const refresh = async () => { await show(id); await load(); };
+    const post = (path, body) => api(`/api/quality${path}`, { method: "POST", body });
+    const buttons = [];
+    if (manager && ["ABERTA", "AGUARDANDO_EFICACIA"].includes(o.status) && o.status === "ABERTA")
+      buttons.push(h("button", { class: "sm", onclick: () => slot.replaceChildren(simpleForm("Iniciar investigação",
+        [h("label", {}, "Responsável", h("select", { name: "owner_id", "data-int": "" },
+          users.filter((u) => u.role !== "MOTORISTA").map((u) => h("option", { value: u.id, selected: u.id === state.me.id }, `${u.name} (${u.role})`))))],
+        "Iniciar", async (f) => { await post(`/occurrences/${id}/investigate`, f); await refresh(); })) }, "Iniciar investigação"));
+    if (staff && o.status === "EM_INVESTIGACAO")
+      buttons.push(h("button", { class: "sm ghost", onclick: () => slot.replaceChildren(simpleForm("Causa raiz",
+        [h("label", {}, "Análise de causa raiz (5 porquês, Ishikawa…)", h("textarea", { name: "root_cause", rows: 4, minlength: 10, required: true }, o.root_cause || ""))],
+        "Salvar", async (f) => { await api(`/api/quality/occurrences/${id}/root-cause`, { method: "PUT", body: f }); await refresh(); })) }, "Causa raiz"));
+    if (manager && ["ABERTA", "EM_INVESTIGACAO"].includes(o.status))
+      buttons.push(h("button", { class: "sm ghost", onclick: () => slot.replaceChildren(simpleForm("Nova ação CAPA", [
+        h("label", {}, "Tipo", h("select", { name: "kind" }, ["CONTENCAO", "CORRETIVA", "PREVENTIVA"].map((k) => h("option", { value: k }, k)))),
+        h("label", {}, "Descrição", h("textarea", { name: "description", rows: 2, minlength: 10, required: true })),
+        h("label", {}, "Responsável", h("select", { name: "responsible_id", "data-int": "" }, users.map((u) => h("option", { value: u.id }, `${u.name} (${u.role})`)))),
+        h("label", {}, "Prazo", h("input", { name: "due_date", type: "date", required: true }))],
+        "Adicionar", async (f) => { await post(`/occurrences/${id}/actions`, f); await refresh(); })) }, "Adicionar ação"));
+    if (manager && o.status === "EM_INVESTIGACAO")
+      buttons.push(h("button", { class: "sm ghost", onclick: guard(async () => { await post(`/occurrences/${id}/effectiveness`); await refresh(); }) }, "Enviar p/ verificação de eficácia"));
+    if (manager && o.status === "AGUARDANDO_EFICACIA") {
+      buttons.push(h("button", { class: "sm", onclick: () => slot.replaceChildren(signedForm(`Encerrar ${o.code}`, {
+        textLabel: "Verificação de eficácia (evidência de que o problema não recorreu)", button: "Assinar e encerrar",
+        onSubmit: async (f) => { await post(`/occurrences/${id}/close`, f); toast("Ocorrência encerrada"); await refresh(); } })) }, "Encerrar"));
+      buttons.push(h("button", { class: "sm ghost", onclick: () => slot.replaceChildren(simpleForm("Ação ineficaz — reabrir investigação",
+        [h("label", {}, "Motivo", h("textarea", { name: "reason", rows: 2, minlength: 10, required: true }))],
+        "Reabrir", async (f) => { await post(`/occurrences/${id}/reopen`, f); await refresh(); })) }, "Ineficaz: reabrir"));
+    }
+    if (manager && ["ABERTA", "EM_INVESTIGACAO"].includes(o.status))
+      buttons.push(h("button", { class: "sm danger", onclick: () => slot.replaceChildren(signedForm(`Cancelar ${o.code}`, {
+        textLabel: "Justificativa", danger: true, button: "Assinar cancelamento",
+        onSubmit: async (f) => { await post(`/occurrences/${id}/cancel`, f); await refresh(); } })) }, "Cancelar"));
+    if (manager && open && o.lot && !o.lot_blocked)
+      buttons.push(h("button", { class: "sm danger", onclick: () => slot.replaceChildren(signedForm(`RECALL: bloquear lote ${o.lot.code}`, {
+        button: "Assinar bloqueio", danger: true,
+        onSubmit: async (f) => { await post(`/occurrences/${id}/block-lot`, f); toast(`Lote ${o.lot.code} BLOQUEADO`, "err"); await refresh(); } })) }, "Bloquear lote (recall)"));
+    if (manager && o.lot_blocked)
+      buttons.push(h("button", { class: "sm ghost", onclick: () => slot.replaceChildren(signedForm(`Devolver lote ${o.lot.code} à quarentena`, {
+        textLabel: "Justificativa (o lote precisará de nova liberação assinada)", button: "Assinar",
+        onSubmit: async (f) => { await post(`/occurrences/${id}/release-lot`, f); await refresh(); } })) }, "Liberar lote p/ reavaliação"));
+
+    detail.replaceChildren(h("div", { class: "card" },
+      h("h2", {}, `${o.code} — ${o.title}`),
+      h("p", {}, badge(o.status), " ", badge(o.severity), " ", KINDS[o.kind], o.lot_blocked ? h("span", { class: "badge s-VENCIDO" }, " LOTE BLOQUEADO") : null),
+      table(["Campo", "Valor"], [
+        ["Descrição", o.description], ["Cliente", o.customer ? o.customer.name : "—"], ["Lote", o.lot ? `${o.lot.code} (${o.lot.status})` : "—"],
+        ["Cilindro", o.cylinder ? o.cylinder.serial : "—"], ["Aberta por", `${o.reported_by.name} em ${fmtDT(o.opened_at)}`],
+        ["Responsável", o.owner ? o.owner.name : "—"], ["Prazo da investigação", fmtDate(o.due_date)],
+        ["Causa raiz", o.root_cause || "—"], ["Eficácia", o.effectiveness_check || "—"],
+        ["Assinatura de encerramento", o.closing_signature_hash ? h("span", { class: "mono" }, o.closing_signature_hash) : "—"]]),
+      h("h2", {}, "Ações (CAPA)"),
+      table(["Tipo", "Descrição", "Responsável", "Prazo", "Status", "Evidência", ""], o.actions.map((a) => [a.kind, a.description, a.responsible.name,
+        fmtDate(a.due_date), badge(a.status), a.evidence || "—",
+        a.status === "PENDENTE" && (manager || a.responsible.id === state.me.id) && ["ABERTA", "EM_INVESTIGACAO"].includes(o.status)
+          ? h("button", { class: "sm", onclick: () => slot.replaceChildren(simpleForm("Concluir ação",
+              [h("label", {}, "Evidência da execução", h("textarea", { name: "evidence", rows: 2, minlength: 10, required: true }))],
+              "Concluir", async (f) => { await post(`/actions/${a.id}/complete`, f); await refresh(); })) }, "Concluir") : ""])),
+      h("div", { class: "row" }, buttons), slot));
+    detail.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const create = h("form", { class: "card", onsubmit: guard(async (ev) => {
+    const body = formData(ev.target);
+    if (body.serial) body.serial = cleanSerial(body.serial);
+    const o = await api("/api/quality/occurrences", { method: "POST", body });
+    toast(`Ocorrência ${o.code} registrada (prazo ${fmtDate(o.due_date)})`, o.severity === "CRITICA" ? "err" : "ok");
+    ev.target.reset();
+    await load();
+    await show(o.id);
+  }) },
+    h("h2", {}, "Registrar ocorrência"),
+    h("div", { class: "row" },
+      h("label", {}, "Tipo", h("select", { name: "kind" }, Object.entries(KINDS).map(([k, v]) => h("option", { value: k }, v)))),
+      h("label", {}, "Gravidade", h("select", { name: "severity" }, SEVERITIES.map((s) => h("option", { value: s }, s))))),
+    h("label", {}, "Título", h("input", { name: "title", required: true, minlength: 5, maxlength: 160 })),
+    h("label", {}, "Descrição (o que, onde, quando, quem relatou)", h("textarea", { name: "description", rows: 3, required: true, minlength: 10 })),
+    h("div", { class: "row" },
+      h("label", {}, "Cliente", customerSelect("customer_id", false)),
+      staff ? h("label", {}, "Lote", h("select", { name: "lot_id", "data-int": "" }, h("option", { value: "" }, "—"),
+        lots.map((l) => h("option", { value: l.id }, `${l.code} (${l.status})`)))) : null),
+    serialField("serial", "Cilindro envolvido (opcional)"),
+    h("button", { type: "submit" }, "Registrar"));
+  create.querySelector("input[name=serial]").required = false;
+
+  const filterBar = h("div", { class: "row" }, ...[["ABERTAS", "Abertas"], ["", "Todas"], ["ENCERRADA", "Encerradas"]].map(([v, l]) =>
+    h("button", { class: "sm ghost", onclick: guard(async () => { filter = v; await load(); }) }, l)));
+  main.append(create, h("div", { class: "card" }, h("h2", {}, roleIs("GESTOR", "OPERADOR") ? "Ocorrências" : "Minhas ocorrências"), filterBar, list), detail);
+  await load();
+}
+
+// ---------------- Fiscal (NF-e) ----------------
+const brl = (v) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+async function viewFiscal(main) {
+  const manager = roleIs("GESTOR");
+  const [cfg, profiles] = await Promise.all([api("/api/fiscal/config"), api("/api/fiscal/profiles")]);
+  if (cfg.provider === "desativado" || !cfg.emitter_configured) {
+    main.append(h("div", { class: "banner" }, "Emissão de NF-e não configurada (FISCAL_PROVIDER, FOCUS_TOKEN, EMITTER_CNPJ, EMITTER_UF). ",
+      "Rascunhos podem ser criados; a emissão fica bloqueada até configurar."));
+  } else if (cfg.environment === "homologacao") {
+    main.append(h("div", { class: "banner" }, "Ambiente de HOMOLOGAÇÃO: notas emitidas aqui não têm valor fiscal."));
+  }
+  const profByGas = Object.fromEntries(profiles.map((p) => [p.gas_type.id, p]));
+  const list = h("div");
+  const detail = h("div");
+
+  const load = async () => {
+    const rows = await api("/api/fiscal/invoices?limit=300");
+    list.replaceChildren(table(["#", "Cliente", "Total", "Status", "Número", "Criada", ""], rows.map((i) => [i.id, i.customer.name, brl(i.total),
+      badge(i.status), i.number ? `${i.number}/${i.series}` : "—", fmtDT(i.created_at),
+      h("button", { class: "sm ghost", onclick: guard(() => show(i.id)) }, "Abrir")])));
+  };
+
+  const itemsEditor = (items = []) => {
+    const box = h("div");
+    const addLine = (it = {}) => {
+      const line = h("div", { class: "row item-line" },
+        h("label", {}, "Gás", h("select", { "data-f": "gas_type_id" }, profiles.map((p) =>
+          h("option", { value: p.gas_type.id, selected: it.gas_type && it.gas_type.id === p.gas_type.id }, `${p.gas_type.code} — ${p.description}`)))),
+        h("label", {}, "Quantidade", h("input", { "data-f": "quantity", type: "number", step: "0.0001", min: "0.0001", required: true, value: it.quantity || 1 })),
+        h("label", {}, "Preço unit. (vazio = padrão)", h("input", { "data-f": "unit_price", type: "number", step: "0.0001", min: "0.0001", value: it.unit_price || null })),
+        h("button", { type: "button", class: "sm danger", onclick: () => line.remove() }, "Remover"));
+      box.append(line);
+    };
+    (items.length ? items : [{}]).forEach(addLine);
+    return { el: h("div", {}, box, h("button", { type: "button", class: "sm ghost", onclick: () => addLine() }, "+ item")),
+      read: () => [...box.querySelectorAll(".item-line")].map((l) => {
+        const v = (f) => l.querySelector(`[data-f=${f}]`).value;
+        const out = { gas_type_id: Number(v("gas_type_id")), quantity: v("quantity") };
+        if (v("unit_price")) out.unit_price = v("unit_price");
+        return out;
+      }) };
+  };
+
+  const show = async (id) => {
+    const inv = await api(`/api/fiscal/invoices/${id}`);
+    const slot = h("div");
+    const refresh = async () => { await show(id); await load(); };
+    const editable = ["RASCUNHO", "REJEITADA"].includes(inv.status);
+    const buttons = [];
+    if (editable) {
+      buttons.push(h("button", { class: "sm ghost", onclick: () => {
+        const ed = itemsEditor(inv.items);
+        slot.replaceChildren(h("form", { class: "sig", onsubmit: guard(async (ev) => {
+          const f = formData(ev.target);
+          await api(`/api/fiscal/invoices/${id}`, { method: "PUT", body: { nature: f.nature, notes: f.notes || null, items: ed.read() } });
+          toast("Rascunho atualizado");
+          await refresh();
+        }) }, h("h2", {}, "Editar rascunho"),
+          h("label", {}, "Natureza da operação", h("input", { name: "nature", required: true, value: inv.nature, maxlength: 60 })),
+          ed.el, h("label", {}, "Informações complementares", h("textarea", { name: "notes", rows: 2, maxlength: 2000 }, inv.notes || "")),
+          h("button", { type: "submit" }, "Salvar")));
+      } }, "Editar"));
+      if (manager) buttons.push(h("button", { class: "sm", onclick: guard(async () => {
+        if (!confirm(`Emitir NF-e de ${brl(inv.total)} para ${inv.customer.name}?`)) return;
+        const r = await api(`/api/fiscal/invoices/${id}/emit`, { method: "POST" });
+        toast(`NF-e ${r.status}${r.provider_message ? ": " + r.provider_message : ""}`, r.status === "REJEITADA" ? "err" : "ok");
+        await refresh();
+      }) }, "Emitir NF-e"));
+    }
+    if (["PROCESSANDO", "AUTORIZADA"].includes(inv.status))
+      buttons.push(h("button", { class: "sm ghost", onclick: guard(async () => { await api(`/api/fiscal/invoices/${id}/refresh`, { method: "POST" }); await refresh(); }) }, "Consultar SEFAZ"));
+    if (inv.status === "AUTORIZADA" && manager)
+      buttons.push(h("button", { class: "sm danger", onclick: () => {
+        const form = h("form", { class: "sig", onsubmit: guard(async (ev) => {
+          const f = formData(ev.target);
+          const r = await api(`/api/fiscal/invoices/${id}/cancel`, { method: "POST", body: f });
+          toast(r.status === "CANCELADA" ? "NF-e cancelada" : (r.provider_message || "Cancelamento não confirmado"), r.status === "CANCELADA" ? "ok" : "err");
+          await refresh();
+        }) }, h("h2", {}, `Cancelar NF-e ${inv.number || ""} (prazo: ${cfg.cancel_hours} h após autorização)`),
+          h("label", {}, "Justificativa (15 a 255 caracteres)", h("textarea", { name: "justification", rows: 2, minlength: 15, maxlength: 255, required: true })),
+          h("label", {}, "Senha (assinatura)", h("input", { name: "signature_password", type: "password", required: true, autocomplete: "current-password" })),
+          h("button", { type: "submit", class: "danger" }, "Assinar e cancelar"));
+        slot.replaceChildren(form);
+      } }, "Cancelar NF-e"));
+    const link = (url, label) => (url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label) : null);
+    detail.replaceChildren(h("div", { class: "card" },
+      h("h2", {}, `Nota #${inv.id} — ${inv.customer.name}`),
+      h("p", {}, badge(inv.status), ` ${inv.nature} · total ${brl(inv.total)}`),
+      inv.provider_message ? h("p", { class: inv.status === "REJEITADA" ? "error" : "muted" }, inv.provider_message) : null,
+      inv.access_key ? h("p", {}, "Chave: ", h("span", { class: "mono" }, inv.access_key), " · ", link(inv.danfe_url, "DANFE (PDF)"), " ", link(inv.xml_url, "XML")) : null,
+      table(["Gás", "Descrição", "Qtd", "Preço", "Total"], inv.items.map((i) => [i.gas_type.code, i.description, Number(i.quantity), brl(i.unit_price), brl(i.total)])),
+      inv.notes ? h("p", { class: "muted" }, inv.notes) : null,
+      h("div", { class: "row" }, buttons), slot));
+    detail.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Perfis fiscais por gás (contador define)
+  const profilesCard = h("div", { class: "card" }, h("h2", {}, "Perfis fiscais por gás"),
+    h("p", { class: "muted" }, "NCM, CFOP, CST e alíquotas devem ser definidos pelo contador da empresa."),
+    table(["Gás", "Descrição", "NCM", "CFOP int./interest.", "Un.", "ICMS", "PIS/COFINS", "Preço padrão", ""],
+      state.gases.map((g) => {
+        const p = profByGas[g.id];
+        return [g.code, p ? p.description : h("span", { class: "muted" }, "sem perfil"), p ? p.ncm : "—", p ? `${p.cfop_internal} / ${p.cfop_interstate}` : "—",
+          p ? p.unit : "—", p ? `CST ${p.icms_cst} · ${p.icms_rate}%` : "—", p ? `${p.pis_cst} / ${p.cofins_cst}` : "—",
+          p && p.default_price ? brl(p.default_price) : "—",
+          manager ? h("button", { class: "sm ghost", onclick: () => editProfile(g, p) }, p ? "Editar" : "Configurar") : ""];
+      })));
+  const profileSlot = h("div");
+  const editProfile = (g, p = {}) => {
+    const f = (name, label, attrs = {}) => h("label", {}, label, h("input", { name, value: p[name] ?? null, required: true, ...attrs }));
+    profileSlot.replaceChildren(h("form", { class: "sig", onsubmit: guard(async (ev) => {
+      const body = formData(ev.target);
+      for (const k of ["icms_rate", "default_price"]) if (body[k] !== undefined) body[k] = String(body[k]);
+      await api(`/api/fiscal/profiles/${g.id}`, { method: "PUT", body });
+      toast("Perfil fiscal salvo");
+      go("fiscal");
+    }) }, h("h2", {}, `Perfil fiscal — ${g.code} ${g.name}`),
+      h("div", { class: "row" }, f("description", "Descrição na nota", { maxlength: 120, value: p.description || g.name }),
+        f("ncm", "NCM", { maxlength: 10 }), f("cfop_internal", "CFOP interno", { maxlength: 4, value: p.cfop_internal || "5102" }),
+        f("cfop_interstate", "CFOP interestadual", { maxlength: 4, value: p.cfop_interstate || "6102" })),
+      h("div", { class: "row" },
+        h("label", {}, "Unidade", h("select", { name: "unit" }, ["UN", "M3", "KG", "L", "CIL"].map((u) => h("option", { value: u, selected: p.unit === u }, u)))),
+        f("icms_cst", "CST/CSOSN ICMS", { maxlength: 3 }), f("icms_rate", "Alíquota ICMS %", { type: "number", step: "0.01", min: 0, max: 100, value: p.icms_rate ?? 0 }),
+        f("pis_cst", "CST PIS", { maxlength: 2 }), f("cofins_cst", "CST COFINS", { maxlength: 2 }),
+        f("origin", "Origem (0-8)", { type: "number", min: 0, max: 8, value: p.origin ?? 0 }),
+        h("label", {}, "Preço padrão (R$)", h("input", { name: "default_price", type: "number", step: "0.01", min: "0.01", value: p.default_price ?? null }))),
+      h("button", { type: "submit" }, "Salvar"), " ", h("button", { type: "button", class: "ghost", onclick: () => profileSlot.replaceChildren() }, "Fechar")));
+  };
+
+  // Nova nota avulsa
+  const newEd = itemsEditor();
+  const newForm = h("form", { class: "card", onsubmit: guard(async (ev) => {
+    const f = formData(ev.target);
+    const inv = await api("/api/fiscal/invoices", { method: "POST", body: { customer_id: f.customer_id, nature: f.nature, notes: f.notes || null, items: newEd.read() } });
+    toast(`Rascunho #${inv.id} criado (${brl(inv.total)})`);
+    await load();
+    await show(inv.id);
+  }) }, h("h2", {}, "Nova nota (avulsa)"), h("p", { class: "muted" }, "Para faturar uma entrega, use o botão \"Faturar\" em Movimentações."),
+    h("div", { class: "row" }, h("label", {}, "Cliente", customerSelect()),
+      h("label", {}, "Natureza da operação", h("input", { name: "nature", value: "Venda de mercadoria", required: true, maxlength: 60 }))),
+    newEd.el, h("label", {}, "Informações complementares", h("textarea", { name: "notes", rows: 2, maxlength: 2000 })),
+    h("button", { type: "submit", disabled: profiles.length === 0 }, "Criar rascunho"));
+
+  main.append(profilesCard, profileSlot, profiles.length ? newForm : h("div", { class: "banner" }, "Configure ao menos um perfil fiscal para criar notas."),
+    h("div", { class: "card" }, h("h2", {}, "Notas fiscais"), list), detail);
+  await load();
+  if (state.openInvoice) { const id = state.openInvoice; state.openInvoice = null; await show(id); }
+}

@@ -1,7 +1,7 @@
 // Service worker: mantém o app abrindo sem internet. Dados de API NÃO são cacheados aqui;
 // o app guarda o necessário no IndexedDB (fila de operações + snapshot de referência).
 "use strict";
-const VERSION = "gc-v2";
+const VERSION = "gc-v3";
 const SHELL = ["/", "/static/app.js", "/static/db.js", "/static/styles.css", "/manifest.webmanifest", "/static/icon.svg"];
 
 self.addEventListener("install", (e) => {

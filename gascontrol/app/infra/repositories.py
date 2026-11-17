@@ -10,8 +10,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.domain.errors import ConcurrencyConflict
+from app.domain.fiscal import InvoiceStatus
+from app.domain.quality import OPEN_STATUSES, ActionStatus
 from app.domain.rules import CylinderStatus, LotStatus
-from app.infra.orm import AuditEvent, Customer, Cylinder, GasType, Lot, Movement, SyncReceipt, User
+from app.infra.orm import (
+    AuditEvent, CapaAction, Customer, Cylinder, FiscalProfile, GasType, Invoice, Lot, Movement, Occurrence,
+    SyncReceipt, User,
+)
 
 
 def _like(q: str) -> str:
@@ -189,6 +194,10 @@ class SqlMovementRepository:
             stmt = stmt.where(Movement.user_id == user_id)
         return self.s.scalars(stmt).unique().all()
 
+    def by_operation(self, operation_id: str) -> Sequence[Movement]:
+        return self.s.scalars(select(Movement).where(Movement.operation_id == operation_id)
+                              .order_by(Movement.id)).unique().all()
+
     def all_cylinder_ids(self) -> Sequence[int]:
         return self.s.scalars(select(Cylinder.id).order_by(Cylinder.id)).all()
 
@@ -224,6 +233,103 @@ class SqlAuditRepository:
         return self.s.scalars(select(AuditEvent).order_by(AuditEvent.id)).unique().all()
 
 
+class SqlQualityRepository:
+    def __init__(self, s: Session) -> None:
+        self.s = s
+
+    def get(self, occurrence_id: int) -> Occurrence | None:
+        return self.s.get(Occurrence, occurrence_id)
+
+    def add(self, occ: Occurrence) -> None:
+        self.s.add(occ)
+
+    def add_action(self, action: CapaAction) -> None:
+        self.s.add(action)
+
+    def get_action(self, action_id: int) -> CapaAction | None:
+        return self.s.get(CapaAction, action_id)
+
+    def next_sequence(self, year: int) -> int:
+        prefix = f"OC-{year}-"
+        last = self.s.scalar(select(Occurrence.code).where(Occurrence.code.like(prefix + "%"))
+                             .order_by(Occurrence.code.desc()).limit(1))
+        return int(last.removeprefix(prefix)) + 1 if last else 1
+
+    def search(self, status: str | None, reported_by_id: int | None, lot_id: int | None,
+               limit: int, offset: int) -> Sequence[Occurrence]:
+        stmt = select(Occurrence).order_by(Occurrence.id.desc()).limit(limit).offset(offset)
+        if status == "ABERTAS":
+            stmt = stmt.where(Occurrence.status.in_(list(OPEN_STATUSES)))
+        elif status:
+            stmt = stmt.where(Occurrence.status == status)
+        if reported_by_id:
+            stmt = stmt.where(Occurrence.reported_by_id == reported_by_id)
+        if lot_id:
+            stmt = stmt.where(Occurrence.lot_id == lot_id)
+        return self.s.scalars(stmt).unique().all()
+
+    def open_summary(self) -> dict[str, int]:
+        rows = self.s.execute(select(Occurrence.severity, func.count())
+                              .where(Occurrence.status.in_(list(OPEN_STATUSES)))
+                              .group_by(Occurrence.severity)).all()
+        return {str(sev.value if hasattr(sev, "value") else sev): n for sev, n in rows}
+
+    def overdue_occurrences(self, today: date) -> Sequence[Occurrence]:
+        return self.s.scalars(select(Occurrence).where(Occurrence.status.in_(list(OPEN_STATUSES)),
+                                                       Occurrence.due_date < today)
+                              .order_by(Occurrence.due_date)).unique().all()
+
+    def overdue_actions(self, today: date) -> Sequence[CapaAction]:
+        return self.s.scalars(select(CapaAction).where(CapaAction.status == ActionStatus.PENDENTE,
+                                                       CapaAction.due_date < today)
+                              .order_by(CapaAction.due_date)).unique().all()
+
+    def open_blocking_lot(self, lot_id: int, exclude_id: int) -> int:
+        return self.s.scalar(select(func.count(Occurrence.id)).where(
+            Occurrence.lot_id == lot_id, Occurrence.lot_blocked.is_(True), Occurrence.id != exclude_id,
+            Occurrence.status.in_(list(OPEN_STATUSES)))) or 0
+
+
+class SqlFiscalRepository:
+    def __init__(self, s: Session) -> None:
+        self.s = s
+
+    def get_profile(self, gas_type_id: int) -> FiscalProfile | None:
+        return self.s.get(FiscalProfile, gas_type_id)
+
+    def list_profiles(self) -> Sequence[FiscalProfile]:
+        return self.s.scalars(select(FiscalProfile).order_by(FiscalProfile.gas_type_id)).unique().all()
+
+    def add_profile(self, profile: FiscalProfile) -> None:
+        self.s.add(profile)
+
+    def get(self, invoice_id: int) -> Invoice | None:
+        return self.s.get(Invoice, invoice_id)
+
+    def add(self, invoice: Invoice) -> None:
+        self.s.add(invoice)
+
+    def search(self, status: InvoiceStatus | None, customer_id: int | None, limit: int, offset: int) -> Sequence[Invoice]:
+        stmt = select(Invoice).order_by(Invoice.id.desc()).limit(limit).offset(offset)
+        if status:
+            stmt = stmt.where(Invoice.status == status)
+        if customer_id:
+            stmt = stmt.where(Invoice.customer_id == customer_id)
+        return self.s.scalars(stmt).unique().all()
+
+    def by_operation(self, operation_id: str) -> Sequence[Invoice]:
+        return self.s.scalars(select(Invoice).where(Invoice.operation_id == operation_id,
+                                                    Invoice.status != InvoiceStatus.CANCELADA)).unique().all()
+
+    def processing_ids(self, limit: int) -> Sequence[int]:
+        return self.s.scalars(select(Invoice.id).where(Invoice.status == InvoiceStatus.PROCESSANDO)
+                              .order_by(Invoice.updated_at).limit(limit)).all()
+
+    def count_by_status(self) -> dict[str, int]:
+        rows = self.s.execute(select(Invoice.status, func.count()).group_by(Invoice.status)).all()
+        return {str(st.value if hasattr(st, "value") else st): n for st, n in rows}
+
+
 class SqlUnitOfWork:
     """Transação única por caso de uso. Converte erros de concorrência/integridade em Conflict."""
 
@@ -241,6 +347,8 @@ class SqlUnitOfWork:
         self.movements = SqlMovementRepository(s)
         self.receipts = SqlReceiptRepository(s)
         self.audit = SqlAuditRepository(s)
+        self.quality = SqlQualityRepository(s)
+        self.fiscal = SqlFiscalRepository(s)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001

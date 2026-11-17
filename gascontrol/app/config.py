@@ -25,6 +25,20 @@ class Settings(BaseModel):
     login_max_attempts: int = Field(default=5, ge=1, le=50)
     login_lockout_seconds: int = Field(default=900, ge=10)
     metrics_token: str | None = None
+    fiscal_provider: str = Field(default="none")
+    focus_token: str | None = None
+    focus_environment: str = Field(default="homologacao")
+    emitter_cnpj: str | None = None
+    emitter_uf: str | None = None
+    fiscal_cancel_hours: int = Field(default=24, ge=1, le=720)
+    fiscal_poll_seconds: int = Field(default=60, ge=0, le=3600)
+
+    @field_validator("fiscal_provider")
+    @classmethod
+    def _provider(cls, v: str) -> str:
+        if v not in {"none", "focusnfe"}:
+            raise ValueError("FISCAL_PROVIDER deve ser none|focusnfe")
+        return v
 
     @field_validator("env")
     @classmethod
@@ -60,6 +74,13 @@ def load_settings() -> Settings:
         login_max_attempts=int(os.getenv("LOGIN_MAX_ATTEMPTS", "5")),
         login_lockout_seconds=int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900")),
         metrics_token=os.getenv("METRICS_TOKEN") or None,
+        fiscal_provider=os.getenv("FISCAL_PROVIDER", "none"),
+        focus_token=os.getenv("FOCUS_TOKEN") or None,
+        focus_environment=os.getenv("FOCUS_ENVIRONMENT", "homologacao"),
+        emitter_cnpj="".join(ch for ch in os.getenv("EMITTER_CNPJ", "") if ch.isdigit()) or None,
+        emitter_uf=(os.getenv("EMITTER_UF") or "").upper() or None,
+        fiscal_cancel_hours=int(os.getenv("FISCAL_CANCEL_HOURS", "24")),
+        fiscal_poll_seconds=int(os.getenv("FISCAL_POLL_SECONDS", "60")),
     )
 
 

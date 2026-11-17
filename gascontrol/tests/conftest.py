@@ -5,19 +5,52 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from app.application.ports import FiscalDocument, FiscalResult
 from app.config import Settings
+from app.domain.errors import ExternalServiceError
 from app.main import create_app
+
+
+class FakeFiscalGateway:
+    """Emissor simulado: comportamento programável por teste."""
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.emitted: list[FiscalDocument] = []
+        self.next_emit = FiscalResult(status="processing")
+        self.next_query = FiscalResult(status="authorized", access_key="3" * 44, number="101", series="1",
+                                       danfe_url="https://homologacao.focusnfe.com.br/arquivos/danfe.pdf")
+        self.next_cancel = FiscalResult(status="cancelled", access_key="3" * 44)
+        self.down = False
+
+    def emit(self, doc):
+        if self.down:
+            raise ExternalServiceError("fora do ar")
+        self.emitted.append(doc)
+        return self.next_emit
+
+    def query(self, ref):
+        return self.next_query
+
+    def cancel(self, ref, justification):
+        return self.next_cancel
 
 ADMIN = ("admin@example.com", "Admin-Pass-123!")
 PWD = "Strong-Pass-123!"
 
 
 @pytest.fixture()
-def client(tmp_path):
+def fake_gw():
+    return FakeFiscalGateway()
+
+
+@pytest.fixture()
+def client(tmp_path, fake_gw):
     settings = Settings(env="test", database_url=f"sqlite:///{tmp_path}/t.db", jwt_secret="x" * 48,
                         admin_email=ADMIN[0], admin_password=ADMIN[1], log_level="WARNING",
-                        login_max_attempts=3, login_lockout_seconds=60)
-    with TestClient(create_app(settings)) as c:
+                        login_max_attempts=3, login_lockout_seconds=60, emitter_cnpj="11222333000181",
+                        emitter_uf="SP", fiscal_poll_seconds=0)
+    with TestClient(create_app(settings, fiscal_gateway=fake_gw)) as c:
         yield c
 
 
