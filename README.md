@@ -37,6 +37,9 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 | **🔑 PH IPTV — Licenças** | Servidor de licenças do PH IPTV: emissão, validação e controle das licenças dos apps | PHP |
 | **🤖 Agente de Vendas** | Agente de vendas automatizado no WhatsApp, com atendimento assistido por IA | TypeScript · Node.js · Claude |
 | **🛡️ Proteção do DWAgent** | Mantém o acesso remoto (DWAgent) sempre ativo no Windows e exige senha para desativar ou desinstalar | PowerShell |
+| **🧪 PB Gases** | Controle e rastreabilidade de cilindros de gases industriais e medicinais: QR, lotes com liberação assinada, app de campo offline, NF-e, LGPD e instaladores para Windows e Android | Python · FastAPI · JavaScript · Java (Android) |
+| **🌐 Sites da PB Tecnologia** | Sites institucionais da PB Tecnologia e do PB IPTV | HTML · CSS · JavaScript |
+| **✉️ PB Mailflare** | Serviço de e-mail da PB Tecnologia | TypeScript · Docker · PostgreSQL |
 
 ---
 
