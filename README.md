@@ -34,7 +34,6 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 | **📺 PH IPTV — Samsung Tizen** | Player IPTV para Smart TVs Samsung Tizen (2018+) | JavaScript · Tizen |
 | **🎧 Helpdesk** | Sistema de chamados de TI para empresas, com painel de atendimento, relatórios e controle por setor | React · Node.js · PostgreSQL · Docker |
 | **💽 PH Gerenciamento de Partições** | Gerenciador de partições para Windows e Windows Server: redimensiona, move e realoca espaço não alocado com simulação antes de aplicar | Python · Tkinter · PowerShell |
-| **🔑 PH IPTV — Licenças** | Servidor de licenças do PH IPTV: emissão, validação e controle das licenças dos apps | PHP |
 | **🤖 Agente de Vendas** | Agente de vendas automatizado no WhatsApp, com atendimento assistido por IA | TypeScript · Node.js · Claude |
 | **🛡️ Proteção do DWAgent** | Mantém o acesso remoto (DWAgent) sempre ativo no Windows e exige senha para desativar ou desinstalar | PowerShell |
 | **🧪 PB Gases** | Controle e rastreabilidade de cilindros de gases industriais e medicinais: QR, lotes com liberação assinada, app de campo offline, NF-e, LGPD e instaladores para Windows e Android | Python · FastAPI · JavaScript · Java (Android) |
