@@ -68,6 +68,8 @@ def copyWebAssets = tasks.register("copyWebAssets", Copy) {
 tasks.named("preBuild") { dependsOn copyWebAssets }
 
 dependencies {
+    // Alinha kotlin-stdlib-jdk7/jdk8 (trazidos por bibliotecas antigas) à mesma versão: evita classes duplicadas.
+    implementation platform("org.jetbrains.kotlin:kotlin-bom:1.8.22")
     implementation "androidx.activity:activity:1.9.3"
     implementation "androidx.webkit:webkit:1.12.1"
     implementation "com.journeyapps:zxing-android-embedded:4.3.0"

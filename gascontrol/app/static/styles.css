@@ -50,3 +50,5 @@ body { padding-bottom: calc(var(--brandbar-h) + env(safe-area-inset-bottom, 0px)
 @media (min-width: 900px) { :root { --brandbar-h: 76px; } }
 @media print { .brandbar { display: none; } body { padding-bottom: 0; } }
 #toast { bottom: calc(var(--brandbar-h) + 12px); }
+.small{font-size:.8rem}
+button.ghost.danger{background:transparent;color:var(--err);border-color:var(--err)}

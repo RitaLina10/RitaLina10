@@ -22,8 +22,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
 from app.api.deps import Container
-from app.api.routers import auth, catalog, cylinders, fiscal, quality, reports, sync
+from app.api.routers import auth, catalog, cylinders, fiscal, privacy, quality, reports, sync
 from app.application.fiscal_service import FiscalService
+from app.application.privacy_service import PrivacyService
 from app.application.ports import FiscalGateway
 from app.application.quality_service import QualityService
 from app.application.security import LoginThrottle, TokenService
@@ -53,6 +54,60 @@ SECURITY_HEADERS = {
         "base-uri 'none'; form-action 'self'"
     ),
 }
+
+
+class BodySizeLimitMiddleware:
+    """Recusa corpos acima do limite (413) antes de chegarem ao parser JSON: evita DoS por memória.
+
+    No Docker o Caddy já limita; no servidor Windows (sem proxy) esta é a única barreira.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:  # noqa: ANN001
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > self.max_bytes
+            except ValueError:
+                too_big = True
+            if too_big:
+                await self._reject(send)
+                return
+        received = 0
+        rejected = False
+
+        async def limited_receive():
+            nonlocal received, rejected
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    rejected = True
+                    raise _BodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except _BodyTooLarge:
+            if rejected:
+                await self._reject(send)
+
+    @staticmethod
+    async def _reject(send) -> None:  # noqa: ANN001
+        body = b'{"error":"payload_too_large","message":"Requisi\xc3\xa7\xc3\xa3o grande demais"}'
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+class _BodyTooLarge(Exception):
+    pass
 
 
 def build_fiscal_gateway(settings: Settings) -> FiscalGateway:
@@ -91,6 +146,7 @@ def build_container(settings: Settings, fiscal_gateway: FiscalGateway | None = N
         quality=QualityService(uow),
         fiscal=FiscalService(uow, fiscal_gateway or build_fiscal_gateway(settings), settings.emitter_cnpj,
                              settings.emitter_uf, settings.fiscal_cancel_hours),
+        privacy=PrivacyService(uow, settings.lgpd_retention_years),
         ping_db=ping_db,
     )
     return container, engine
@@ -170,6 +226,7 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
         # Private Network Access: origem segura (APK) chamando servidor em IP de rede local.
         allow_private_network=True,
     )
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
 
     def _err(status: int, code: str, message: object) -> JSONResponse:
         return JSONResponse(status_code=status,
@@ -190,6 +247,12 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
         if exc.headers:
             resp.headers.update(exc.headers)
         return resp
+
+    @app.exception_handler(OverflowError)
+    async def overflow_handler(_: Request, exc: OverflowError):
+        # Número fora do intervalo do banco (ex.: id gigante em campo do corpo): erro do cliente, não 500.
+        log.warning("numeric_overflow_rejected")
+        return _err(422, "invalid_request", "Número fora do intervalo permitido")
 
     @app.exception_handler(Exception)
     async def unhandled(_: Request, exc: Exception):
@@ -215,6 +278,10 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
             supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
             if not hmac.compare_digest(supplied, settings.metrics_token):
                 return Response(status_code=401)
+        elif settings.is_production:
+            client = request.client.host if request.client else ""
+            if client not in {"127.0.0.1", "::1"}:
+                return Response(status_code=404)  # sem METRICS_TOKEN, métricas só localmente
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
     app.include_router(auth.router)
@@ -224,6 +291,7 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
     app.include_router(sync.router)
     app.include_router(quality.router)
     app.include_router(fiscal.router)
+    app.include_router(privacy.router)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

@@ -4,8 +4,10 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app.api.schemas import DbId
 from app.api.deps import Container, current_actor, get_container
 from app.api.schemas import ActiveIn, LoginIn, PasswordChangeIn, TokenOut, UserIn, UserOut
+from app.application.security import password_version
 from app.application.services import Actor
 from app.domain.errors import Forbidden
 from app.observability import LOGIN_FAILURES
@@ -27,7 +29,7 @@ def login(body: LoginIn, request: Request, c: Container = Depends(get_container)
         log.warning("login_failed", extra={"ip": ip})
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciais inválidas")
     c.throttle.success(key)
-    token, ttl = c.tokens.issue(user.id, str(user.role))
+    token, ttl = c.tokens.issue(user.id, str(user.role), password_version(user.password_changed_at))
     log.info("login_ok", extra={"user_id": user.id})
     return TokenOut(access_token=token, expires_in=ttl, role=user.role, name=user.name)
 
@@ -38,9 +40,10 @@ def me(actor: Actor = Depends(current_actor), c: Container = Depends(get_contain
     return UserOut.model_validate(user)
 
 
-@router.post("/auth/password", status_code=204)
+@router.post("/auth/password", response_model=TokenOut)
 def change_password(body: PasswordChangeIn, actor: Actor = Depends(current_actor),
-                    c: Container = Depends(get_container)) -> None:
+                    c: Container = Depends(get_container)) -> TokenOut:
+    """Troca a senha, revoga todas as sessões anteriores e devolve um token novo para esta."""
     key = f"pwd|{actor.user_id}"
     if c.throttle.is_locked(key):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Muitas tentativas; aguarde")
@@ -50,6 +53,9 @@ def change_password(body: PasswordChangeIn, actor: Actor = Depends(current_actor
         c.throttle.fail(key)
         raise
     c.throttle.success(key)
+    user = c.auth.get_active_user(actor.user_id)
+    token, ttl = c.tokens.issue(user.id, str(user.role), password_version(user.password_changed_at))
+    return TokenOut(access_token=token, expires_in=ttl, role=user.role, name=user.name)
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -63,6 +69,6 @@ def create_user(body: UserIn, actor: Actor = Depends(current_actor), c: Containe
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-def set_active(user_id: int, body: ActiveIn, actor: Actor = Depends(current_actor),
+def set_active(user_id: DbId, body: ActiveIn, actor: Actor = Depends(current_actor),
                c: Container = Depends(get_container)):
     return c.auth.set_active(actor, user_id, body.active)

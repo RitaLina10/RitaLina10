@@ -55,6 +55,8 @@ class Settings(BaseModel):
     fiscal_cancel_hours: int = Field(default=24, ge=1, le=720)
     fiscal_poll_seconds: int = Field(default=60, ge=0, le=3600)
     cors_origins: list[str] = Field(default_factory=lambda: [ANDROID_APP_ORIGIN])
+    max_body_bytes: int = Field(default=2 * 1024 * 1024, ge=64 * 1024, le=50 * 1024 * 1024)
+    lgpd_retention_years: int = Field(default=5, ge=1, le=30)
 
     @field_validator("fiscal_provider")
     @classmethod
@@ -105,6 +107,8 @@ def load_settings() -> Settings:
         fiscal_cancel_hours=int(os.getenv("FISCAL_CANCEL_HOURS", "24")),
         fiscal_poll_seconds=int(os.getenv("FISCAL_POLL_SECONDS", "60")),
         cors_origins=parse_origins(os.getenv("CORS_ORIGINS", ANDROID_APP_ORIGIN)),
+        max_body_bytes=int(os.getenv("MAX_BODY_BYTES", str(2 * 1024 * 1024))),
+        lgpd_retention_years=int(os.getenv("LGPD_RETENTION_YEARS", "5")),
     )
 
 

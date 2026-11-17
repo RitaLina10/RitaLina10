@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from app.api.schemas import DbId
 from app.api.deps import Container, get_container, require
 from app.api.routers.cylinders import QR_PREFIX
 from app.api.schemas import AuditEventOut
@@ -44,7 +45,7 @@ def _csv(filename: str, preamble: list[list[object]], header: list[str], rows: I
 
 
 @router.get("/lots/{lot_id}/dossier.csv")
-def lot_dossier(lot_id: int, _: Actor = Depends(require(Role.GESTOR)), c: Container = Depends(get_container)):
+def lot_dossier(lot_id: DbId, _: Actor = Depends(require(Role.GESTOR)), c: Container = Depends(get_container)):
     lot, movements = c.lots.trace(lot_id)
     preamble = [["DOSSIÊ DE LOTE — rastreabilidade e recall"], ["lote", lot.code], ["gas", lot.gas_type.name],
                 ["fabricacao", lot.production_date], ["validade", lot.expiry_date], ["pureza_%", lot.purity_percent],
@@ -65,6 +66,6 @@ def cylinder_csv(serial: str, _: Actor = Depends(require(Role.GESTOR, Role.OPERA
 
 @router.get("/audit/events", response_model=list[AuditEventOut])
 def audit_events(entity: str | None = Query(default=None, max_length=40), limit: int = Query(100, ge=1, le=500),
-                 offset: int = Query(0, ge=0), _: Actor = Depends(require(Role.GESTOR)),
+                 offset: int = Query(0, ge=0, le=1_000_000), _: Actor = Depends(require(Role.GESTOR)),
                  c: Container = Depends(get_container)):
     return c.reports.audit_events(entity, limit, offset)

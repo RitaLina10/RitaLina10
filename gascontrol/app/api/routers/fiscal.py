@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http
 
+from app.api.schemas import DbId
 from app.api.deps import Container, get_container, require
 from app.api.schemas import (
     CancelInvoiceIn, FiscalProfileIn, FiscalProfileOut, FromOperationIn, InvoiceIn, InvoiceItemIn, InvoiceOut,
@@ -37,14 +38,14 @@ def profiles(_: Actor = Depends(staff), c: Container = Depends(get_container)):
 
 
 @router.put("/profiles/{gas_type_id}", response_model=FiscalProfileOut)
-def upsert_profile(gas_type_id: int, body: FiscalProfileIn, actor: Actor = Depends(staff),
+def upsert_profile(gas_type_id: DbId, body: FiscalProfileIn, actor: Actor = Depends(staff),
                    c: Container = Depends(get_container)):
     return c.fiscal.upsert_profile(actor, ProfileInput(gas_type_id=gas_type_id, **body.model_dump()))
 
 
 @router.get("/invoices", response_model=list[InvoiceOut])
-def invoices(status: InvoiceStatus | None = None, customer_id: int | None = Query(default=None, gt=0),
-             limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+def invoices(status: InvoiceStatus | None = None, customer_id: int | None = Query(default=None, gt=0, le=2**62),
+             limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0, le=1_000_000),
              _: Actor = Depends(staff), c: Container = Depends(get_container)):
     return c.fiscal.search(status, customer_id, limit, offset)
 
@@ -60,27 +61,27 @@ def from_operation(body: FromOperationIn, actor: Actor = Depends(staff), c: Cont
 
 
 @router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
-def get_one(invoice_id: int, _: Actor = Depends(staff), c: Container = Depends(get_container)):
+def get_one(invoice_id: DbId, _: Actor = Depends(staff), c: Container = Depends(get_container)):
     return c.fiscal.get(invoice_id)
 
 
 @router.put("/invoices/{invoice_id}", response_model=InvoiceOut)
-def update(invoice_id: int, body: InvoiceUpdateIn, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
+def update(invoice_id: DbId, body: InvoiceUpdateIn, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
     return c.fiscal.update_draft(actor, invoice_id, body.nature, _items(body.items), body.notes)
 
 
 @router.post("/invoices/{invoice_id}/emit", response_model=InvoiceOut)
-def emit(invoice_id: int, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
+def emit(invoice_id: DbId, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
     return c.fiscal.emit(actor, invoice_id)
 
 
 @router.post("/invoices/{invoice_id}/refresh", response_model=InvoiceOut)
-def refresh(invoice_id: int, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
+def refresh(invoice_id: DbId, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
     return c.fiscal.refresh(actor, invoice_id)
 
 
 @router.post("/invoices/{invoice_id}/cancel", response_model=InvoiceOut)
-def cancel(invoice_id: int, body: CancelInvoiceIn, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
+def cancel(invoice_id: DbId, body: CancelInvoiceIn, actor: Actor = Depends(staff), c: Container = Depends(get_container)):
     key = f"sign|{actor.user_id}"
     if c.throttle.is_locked(key):
         raise HTTPException(http.HTTP_429_TOO_MANY_REQUESTS, "Assinatura bloqueada temporariamente")

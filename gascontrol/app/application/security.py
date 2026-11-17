@@ -61,15 +61,24 @@ class TokenService:
         self._secret = secret
         self._ttl = timedelta(minutes=ttl_minutes)
 
-    def issue(self, user_id: int, role: str) -> tuple[str, int]:
+    def issue(self, user_id: int, role: str, pwv: int = 0) -> tuple[str, int]:
+        """pwv = versão da senha (ms da última troca). Token com pwv diferente do atual é recusado."""
         now = datetime.now(timezone.utc)
-        payload = {"sub": str(user_id), "role": role, "iat": now, "nbf": now,
+        payload = {"sub": str(user_id), "role": role, "iat": now, "nbf": now, "pwv": int(pwv),
                    "exp": now + self._ttl, "jti": secrets.token_hex(8), "iss": "gascontrol"}
         return jwt.encode(payload, self._secret, algorithm=self.ALGO), int(self._ttl.total_seconds())
 
     def decode(self, token: str) -> dict[str, object]:
         return jwt.decode(token, self._secret, algorithms=[self.ALGO], issuer="gascontrol",
                           options={"require": ["exp", "sub", "iat", "iss"]})
+
+
+def password_version(changed_at: datetime | None) -> int:
+    if changed_at is None:
+        return 0
+    if changed_at.tzinfo is None:  # SQLite devolve datetime ingênuo (gravado em UTC)
+        changed_at = changed_at.replace(tzinfo=timezone.utc)
+    return int(changed_at.timestamp() * 1000)
 
 
 class LoginThrottle:

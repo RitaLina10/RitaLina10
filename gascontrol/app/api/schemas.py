@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal
 
+from fastapi import Path
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
 from decimal import Decimal
@@ -23,6 +24,10 @@ Code = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max
 # Aceita o payload do QR ("GC1:<serial>") ou o serial puro; o domínio normaliza.
 ScannedSerial = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=44,
                                                  pattern=r"^(GC1:)?[A-Za-z0-9\-]+$")]
+
+
+# Identificador de banco: positivo e dentro do INTEGER de 64 bits do SQLite/PostgreSQL.
+DbId = Annotated[int, Path(gt=0, le=2**62)]
 
 
 class Strict(BaseModel):
@@ -145,7 +150,7 @@ class CustomerOut(ORM):
 # ---- lotes ----
 class LotIn(Strict):
     code: Code
-    gas_type_id: int = Field(gt=0)
+    gas_type_id: int = Field(gt=0, le=2**62)
     production_date: date
     expiry_date: date
     purity_percent: float | None = Field(default=None, ge=0, le=100)
@@ -189,7 +194,7 @@ class CustomerBrief(ORM):
 # ---- cilindros ----
 class CylinderIn(Strict):
     serial: Code
-    gas_type_id: int = Field(gt=0)
+    gas_type_id: int = Field(gt=0, le=2**62)
     capacity_liters: float = Field(gt=0, le=100_000)
     last_hydro_test: date
     manufacturer: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
@@ -216,8 +221,8 @@ class CylinderOut(ORM):
 class MovementIn(Strict):
     serial: ScannedSerial
     type: MovementType
-    customer_id: int | None = Field(default=None, gt=0)
-    lot_id: int | None = Field(default=None, gt=0)
+    customer_id: int | None = Field(default=None, gt=0, le=2**62)
+    lot_id: int | None = Field(default=None, gt=0, le=2**62)
     is_loan: bool = False
     document_ref: DocRef = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
@@ -237,7 +242,7 @@ class MovementIn(Strict):
 class ExchangeIn(Strict):
     full_serial: ScannedSerial
     empty_serial: ScannedSerial
-    customer_id: int = Field(gt=0)
+    customer_id: int = Field(gt=0, le=2**62)
     is_loan: bool = False
     document_ref: DocRef = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
@@ -344,13 +349,13 @@ class OccurrenceIn(Strict):
     severity: Severity
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=160)]
     description: LongText
-    customer_id: int | None = Field(default=None, gt=0)
-    lot_id: int | None = Field(default=None, gt=0)
+    customer_id: int | None = Field(default=None, gt=0, le=2**62)
+    lot_id: int | None = Field(default=None, gt=0, le=2**62)
     serial: ScannedSerial | None = None
 
 
 class InvestigateIn(Strict):
-    owner_id: int | None = Field(default=None, gt=0)
+    owner_id: int | None = Field(default=None, gt=0, le=2**62)
 
 
 class RootCauseIn(Strict):
@@ -360,7 +365,7 @@ class RootCauseIn(Strict):
 class ActionIn(Strict):
     kind: ActionType
     description: LongText
-    responsible_id: int = Field(gt=0)
+    responsible_id: int = Field(gt=0, le=2**62)
     due_date: date
 
 
@@ -449,14 +454,14 @@ class FiscalProfileOut(ORM):
 
 
 class InvoiceItemIn(Strict):
-    gas_type_id: int = Field(gt=0)
+    gas_type_id: int = Field(gt=0, le=2**62)
     quantity: Money
     unit_price: Money | None = None
     description: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
 
 
 class InvoiceIn(Strict):
-    customer_id: int = Field(gt=0)
+    customer_id: int = Field(gt=0, le=2**62)
     nature: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=60)] = "Venda de mercadoria"
     items: list[InvoiceItemIn] = Field(min_length=1, max_length=50)
     notes: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=2000)] = None

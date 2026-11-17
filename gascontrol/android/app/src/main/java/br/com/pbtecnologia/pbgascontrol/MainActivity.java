@@ -81,7 +81,7 @@ public class MainActivity extends ComponentActivity {
     private static final int MAX_FILE_BYTES = 15 * 1024 * 1024;
     private static final Pattern SAFE_NAME = Pattern.compile("[^A-Za-z0-9._-]");
     private static final Set<String> ALLOWED_MIME = new HashSet<>(Arrays.asList("text/csv",
-            "application/pdf", "image/png", "application/xml", "text/xml", "text/plain"));  // Set.of exige API 30
+            "application/pdf", "image/png", "application/xml", "text/xml", "text/plain", "application/json"));  // Set.of exige API 30
 
     private WebView webView;
     private WebViewAssetLoader assetLoader;

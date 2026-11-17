@@ -30,8 +30,8 @@ def _out(c: Container, cyl) -> CylinderOut:  # noqa: ANN001
 
 @router.get("/cylinders", response_model=list[CylinderOut])
 def search(q: str | None = Query(default=None, max_length=40), status: CylinderStatus | None = None,
-           customer_id: int | None = Query(default=None, gt=0), gas_type_id: int | None = Query(default=None, gt=0),
-           limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+           customer_id: int | None = Query(default=None, gt=0, le=2**62), gas_type_id: int | None = Query(default=None, gt=0, le=2**62),
+           limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0, le=1_000_000),
            _: Actor = Depends(current_actor), c: Container = Depends(get_container)):
     return [_out(c, x) for x in c.cylinders.search(q, status, customer_id, gas_type_id, limit, offset)]
 
@@ -80,8 +80,8 @@ def exchange(body: ExchangeIn, actor: Actor = Depends(current_actor), c: Contain
 
 
 @router.get("/movements", response_model=list[MovementOut])
-def recent(customer_id: int | None = Query(default=None, gt=0), mine: bool = False,
-           limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+def recent(customer_id: int | None = Query(default=None, gt=0, le=2**62), mine: bool = False,
+           limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0, le=1_000_000),
            actor: Actor = Depends(current_actor), c: Container = Depends(get_container)):
     # Motorista só enxerga as próprias movimentações (escopo de acesso).
     user_id = actor.user_id if (mine or actor.role == Role.MOTORISTA) else None

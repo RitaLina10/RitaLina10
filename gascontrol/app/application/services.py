@@ -186,6 +186,7 @@ class AuthService:
             if not u or not u.active or not verify_password(current, u.password_hash):
                 raise Forbidden("Senha atual incorreta")
             u.password_hash = new_hash
+            u.password_changed_at = self._clock()
             _audit(uow, actor.user_id, "TROCAR_SENHA", "usuario", u.id, {}, self._clock())
             uow.commit()
             log.info("password_changed", extra={"user_id": u.id})

@@ -458,6 +458,8 @@ async function viewOperation(main) {
   }
   if (!online()) main.append(h("div", { class: "banner" },
     "Modo offline: as operações ficam salvas neste aparelho e são enviadas automaticamente quando a internet voltar."));
+  main.append(h("p", { class: "muted small" }, "Privacidade (LGPD): a localização do aparelho é registrada somente no momento "
+    + "de cada operação, para rastreabilidade da entrega exigida pela ANVISA. Não há rastreamento contínuo."));
 
   const usableLots = snap.lots.filter((l) => l.status !== "REPROVADO");
   const types = [
@@ -646,14 +648,30 @@ async function viewCustomers(main) {
   const list = h("div");
   const render = async () => {
     const rows = await api("/api/customers?limit=200");
-    list.replaceChildren(table(["Nome", "CPF/CNPJ", "Telefone", "Estab. saúde", "Ativo", ""],
+    list.replaceChildren(table(["Nome", "CPF/CNPJ", "Município", "Estab. saúde", "Ativo", ""],
       rows.map((c) => [c.name, c.document, c.city ? `${c.city}/${c.uf}` : "—", c.is_health_facility ? "Sim" : "Não", c.active ? "Sim" : "Não",
         h("span", {},
           h("button", { class: "sm ghost", onclick: guard(async () => {
             const cyl = await api(`/api/cylinders?customer_id=${c.id}&limit=500`);
             toast(`${c.name}: ${cyl.length} cilindro(s) em posse — ${cyl.map((r) => r.serial).join(", ") || "nenhum"}`);
           }) }, "Saldo"), " ",
-          roleIs("GESTOR", "OPERADOR") ? h("button", { class: "sm ghost", onclick: () => editCustomer(c) }, "Endereço fiscal") : null)])));
+          roleIs("GESTOR", "OPERADOR") ? h("button", { class: "sm ghost", onclick: () => editCustomer(c) }, "Endereço fiscal") : null,
+          state.me.role === "ADMIN" && !c.document.startsWith("ANON") ? h("span", {}, " ",
+            h("button", { class: "sm ghost", title: "LGPD art. 18: acesso e portabilidade",
+              onclick: guard(() => download(`/api/privacy/customers/${c.id}/export`, `titular-${c.id}.json`)) }, "Dados (LGPD)"), " ",
+            h("button", { class: "sm ghost danger", onclick: () => anonymize(c) }, "Anonimizar")) : null)])));
+  };
+  // LGPD art. 18 IV/VI — irreversível; o servidor recusa enquanto houver obrigação legal de guarda (art. 16, I).
+  const anonymize = (c) => {
+    const form = signedForm(`Anonimizar ${c.name}`, { button: "Anonimizar definitivamente", danger: true, onSubmit: async (f) => {
+      await api(`/api/privacy/customers/${c.id}/anonymize`, { method: "POST", body: { password: f.signature_password } });
+      toast("Dados pessoais anonimizados. O histórico de rastreabilidade foi mantido sem identificação.");
+      await Promise.all([render(), refreshSnapshot()]);
+    } });
+    form.prepend(h("p", { class: "banner" }, "Ação irreversível. Nome, documento, contato e endereço serão apagados. "
+      + "Só é permitida após o prazo legal de guarda das movimentações e notas fiscais."));
+    editor.replaceChildren(form);
+    form.scrollIntoView({ behavior: "smooth" });
   };
   const editor = h("div");
   const editCustomer = (c) => {
@@ -903,10 +921,13 @@ function renderPasswordForm() {
   $("#main").replaceChildren(h("form", { class: "card narrow", onsubmit: guard(async (ev) => {
     const f = formData(ev.target);
     if (f.new_password !== f.confirm_password) throw new Error("A confirmação não confere com a nova senha");
-    await api("/api/auth/password", { method: "POST",
+    const r = await api("/api/auth/password", { method: "POST",
       body: { current_password: f.current_password, new_password: f.new_password } });
+    state.token = r.access_token;  // sessões abertas em outros aparelhos foram encerradas pelo servidor
+    state.sessionAt = Date.now();
+    await saveSession();
     ev.target.reset();
-    toast("Senha alterada. Use a nova senha no próximo login.");
+    toast("Senha alterada. Sessões em outros aparelhos foram encerradas.");
   }) },
     h("h2", {}, "Trocar minha senha"),
     pwd("current_password", "Senha atual", "current-password"),

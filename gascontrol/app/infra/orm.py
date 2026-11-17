@@ -24,6 +24,8 @@ class User(Base):
     role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False, length=20))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Tokens emitidos antes deste instante são recusados (troca de senha revoga sessões).
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class GasType(Base):

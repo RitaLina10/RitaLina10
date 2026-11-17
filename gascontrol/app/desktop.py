@@ -34,7 +34,7 @@ ALLOWED_KEYS = {
     "APP_ENV", "JWT_SECRET", "JWT_TTL_MINUTES", "ADMIN_EMAIL", "PORT", "LOG_LEVEL", "HYDRO_TEST_VALIDITY_YEARS",
     "HYDRO_ALERT_DAYS", "LOGIN_MAX_ATTEMPTS", "LOGIN_LOCKOUT_SECONDS", "METRICS_TOKEN", "FISCAL_PROVIDER",
     "FOCUS_TOKEN", "FOCUS_ENVIRONMENT", "EMITTER_CNPJ", "EMITTER_UF", "FISCAL_CANCEL_HOURS", "FISCAL_POLL_SECONDS",
-    "CORS_ORIGINS", "BACKUP_KEEP", "BACKUP_INTERVAL_HOURS",
+    "CORS_ORIGINS", "BACKUP_KEEP", "BACKUP_INTERVAL_HOURS", "HOST", "MAX_BODY_BYTES", "LGPD_RETENTION_YEARS",
 }
 
 log = logging.getLogger("pbgas.desktop")
@@ -194,8 +194,10 @@ def serve() -> int:
                            float(cfg.get("BACKUP_INTERVAL_HOURS", 24)), stop)).start()
     log.info("server_starting", extra={"port": port, "home": str(home), "lan": lan_addresses()})
     try:
-        uvicorn.run(app, host="0.0.0.0", port=port, log_config=None, access_log=False,
-                    timeout_keep_alive=10, limit_concurrency=200)
+        # HOST=127.0.0.1 restringe ao próprio PC; o padrão atende a rede local (celulares).
+        host = cfg.get("HOST", "0.0.0.0")  # nosec B104 - servidor de rede local por design
+        uvicorn.run(app, host=host, port=port, log_config=None, access_log=False, server_header=False,
+                    timeout_keep_alive=10, limit_concurrency=200, h11_max_incomplete_event_size=64 * 1024)
     finally:
         stop.set()
     return 0

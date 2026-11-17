@@ -8,8 +8,9 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.fiscal_service import FiscalService
+from app.application.privacy_service import PrivacyService
 from app.application.quality_service import QualityService
-from app.application.security import LoginThrottle, TokenService
+from app.application.security import LoginThrottle, TokenService, password_version
 from app.application.services import (
     Actor, AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
 )
@@ -30,6 +31,7 @@ class Container:
     sync: SyncService
     quality: QualityService
     fiscal: FiscalService
+    privacy: PrivacyService
     ping_db: object  # Callable[[], None]
 
 
@@ -55,6 +57,12 @@ def current_actor(creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     user = c.auth.get_active_user(user_id)
     if user is None:
         raise unauthorized
+    try:
+        token_pwv = int(str(payload.get("pwv", 0)))
+    except ValueError:
+        raise unauthorized from None
+    if token_pwv != password_version(user.password_changed_at):
+        raise unauthorized  # sessão anterior à troca de senha
     return Actor(user_id=user.id, role=Role(user.role))
 
 
