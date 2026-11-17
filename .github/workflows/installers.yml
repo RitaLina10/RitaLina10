@@ -80,7 +80,7 @@ jobs:
             Write-Output "===== tarefa ====="; Get-ScheduledTask -TaskName 'PB Gas Control' -ErrorAction SilentlyContinue | Get-ScheduledTaskInfo | Format-List | Out-String | Write-Output
           }
           $setup = Get-ChildItem dist\installer\PBGasControl-Setup-*.exe | Select-Object -First 1
-          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=firewall','/LOG=setup.log' -PassThru
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=firewall','/ADMINEMAIL=admin@pbgascontrol.com.br','/LOG=setup.log' -PassThru
           if (-not $p.WaitForExit(300000)) { Write-Output "TIMEOUT do instalador"; Show-Diag; exit 1 }
           if ($p.ExitCode -ne 0) { Show-Diag; exit 1 }
           try {

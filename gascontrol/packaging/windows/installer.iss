@@ -147,7 +147,9 @@ begin
     'Informe o e-mail do administrador. A senha inicial será gerada automaticamente e mostrada ao final.');
   SetupPage.Add('E-mail do administrador:', False);
   SetupPage.Add('Porta do servidor (1024-65535):', False);
-  SetupPage.Values[1] := '8000';
+  // Instalação automatizada: setup.exe /VERYSILENT /ADMINEMAIL=ti@empresa.com.br /PORT=8000
+  SetupPage.Values[0] := ExpandConstant('{param:ADMINEMAIL|}');
+  SetupPage.Values[1] := ExpandConstant('{param:PORT|8000}');
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -163,6 +165,22 @@ begin
   if (SetupPage <> nil) and (CurPageID = SetupPage.ID) then
   begin
     SetupPage.Values[0] := Trim(SetupPage.Values[0]);
+    // Modo silencioso: não há quem corrija o campo; usa o padrão em vez de repetir a página para sempre.
+    if WizardSilent then
+    begin
+      if not ValidEmail(SetupPage.Values[0]) then
+      begin
+        Log('ADMINEMAIL ausente ou inválido; usando o padrão');
+        SetupPage.Values[0] := 'admin@pbgascontrol.com.br';
+      end;
+      P := StrToIntDef(Trim(SetupPage.Values[1]), 0);
+      if (P < 1024) or (P > 65535) then
+      begin
+        Log('PORT inválida; usando 8000');
+        SetupPage.Values[1] := '8000';
+      end;
+      Exit;
+    end;
     if not ValidEmail(SetupPage.Values[0]) then
     begin
       MsgBox('Informe um e-mail válido (ex.: admin@suaempresa.com.br).', mbError, MB_OK);

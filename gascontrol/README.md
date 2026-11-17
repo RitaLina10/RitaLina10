@@ -167,6 +167,8 @@ a cada push que altera `gascontrol/`. Baixe em **Actions → execução → Arti
 3. Ao final, o instalador mostra `PRIMEIRO-ACESSO.txt` com a **senha inicial gerada** e os endereços de rede (ex.: `http://192.168.0.10:8000`).
 4. Entre e troque a senha em **Minha senha**. Apague o `PRIMEIRO-ACESSO.txt`.
 
+Instalação automatizada (TI): `PBGasControl-Setup-x.y.z.exe /VERYSILENT /ADMINEMAIL=ti@empresa.com.br /PORT=8000 /TASKS=firewall`.
+
 O que o instalador faz:
 - O servidor roda como tarefa do Windows na conta SYSTEM, inicia junto com o computador (mesmo sem ninguém logado) e reinicia sozinho se cair.
 - Dados, configuração e logs ficam em `C:\ProgramData\PB Gas Control\` (acesso restrito a Administradores):
