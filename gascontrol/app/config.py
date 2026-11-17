@@ -4,12 +4,34 @@ from __future__ import annotations
 import os
 import secrets
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+APP_NAME = "PB Gas Control"
+APP_VENDOR = "PB Tecnologia"
+APP_FULL_NAME = f"{APP_VENDOR} - {APP_NAME}"
+# Origem fixa do app Android (WebViewAssetLoader): a interface roda embarcada no APK.
+ANDROID_APP_ORIGIN = "https://appassets.androidplatform.net"
+
+
+def parse_origins(raw: str) -> list[str]:
+    """Valida origens CORS (esquema://host[:porta]) — nunca aceita curinga."""
+    out: list[str] = []
+    for item in (x.strip() for x in raw.split(",")):
+        if not item:
+            continue
+        parts = urlsplit(item)
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.path not in {"", "/"} \
+                or parts.query or parts.fragment or parts.username or parts.password:
+            raise ConfigError(f"Origem CORS inválida: {item!r}")
+        out.append(f"{parts.scheme}://{parts.netloc}".lower())
+    return out
 
 
 class Settings(BaseModel):
@@ -32,6 +54,7 @@ class Settings(BaseModel):
     emitter_uf: str | None = None
     fiscal_cancel_hours: int = Field(default=24, ge=1, le=720)
     fiscal_poll_seconds: int = Field(default=60, ge=0, le=3600)
+    cors_origins: list[str] = Field(default_factory=lambda: [ANDROID_APP_ORIGIN])
 
     @field_validator("fiscal_provider")
     @classmethod
@@ -81,6 +104,7 @@ def load_settings() -> Settings:
         emitter_uf=(os.getenv("EMITTER_UF") or "").upper() or None,
         fiscal_cancel_hours=int(os.getenv("FISCAL_CANCEL_HOURS", "24")),
         fiscal_poll_seconds=int(os.getenv("FISCAL_POLL_SECONDS", "60")),
+        cors_origins=parse_origins(os.getenv("CORS_ORIGINS", ANDROID_APP_ORIGIN)),
     )
 
 

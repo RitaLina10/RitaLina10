@@ -1,4 +1,4 @@
-// GasControl SPA — offline-first para operações de campo.
+// PB Tecnologia - PB Gas Control — SPA offline-first para operações de campo (web e app Android).
 // Segurança: nenhum dado do servidor é inserido via innerHTML; todo texto passa por textContent (h()).
 "use strict";
 import { kv, outbox, failed, moveToFailed, retryFailed } from "/static/db.js";
@@ -36,6 +36,64 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
   : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
       (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)));
 
+// ---------------- app Android (ponte nativa) ----------------
+// No APK a interface é servida de dentro do aplicativo (https://appassets.androidplatform.net) e a
+// API fica no servidor configurado pelo usuário. A ponte só existe para essa origem (addWebMessageListener).
+const NATIVE = (typeof window.PBGasAndroid === "object" && window.PBGasAndroid
+  && typeof window.PBGasAndroid.postMessage === "function") ? window.PBGasAndroid : null;
+const SERVER_KEY = "pbgas.server";
+const nativePending = new Map();
+let nativeSeq = 0;
+if (NATIVE) {
+  NATIVE.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch (_) { return; }
+    const p = m && nativePending.get(m.id);
+    if (!p) return;
+    nativePending.delete(m.id);
+    if (m.ok) p.resolve(m.result ?? null); else p.reject(new Error(m.error || "Falha no aplicativo"));
+  };
+}
+function nativeCall(cmd, payload = {}, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    const id = ++nativeSeq;
+    const timer = setTimeout(() => { nativePending.delete(id); reject(new Error("O aplicativo não respondeu")); }, timeoutMs);
+    nativePending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); },
+                            reject: (e) => { clearTimeout(timer); reject(e); } });
+    NATIVE.postMessage(JSON.stringify({ ...payload, id, cmd }));
+  });
+}
+function isPrivateHost(host) {
+  const hn = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hn === "localhost" || hn.endsWith(".local") || hn.endsWith(".lan") || hn.endsWith(".internal")) return true;
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(hn) || hn === "::1") return true;
+  const m = hn.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+// Normaliza o endereço do servidor. HTTP sem criptografia só é aceito para rede local.
+function normalizeServer(raw) {
+  let text = String(raw || "").trim();
+  if (!text) throw new Error("Informe o endereço do servidor");
+  if (!/^[a-z]+:\/\//i.test(text)) {
+    const host = text.split(/[/:]/)[0];
+    text = (isPrivateHost(host) ? "http://" : "https://") + text;
+  }
+  let u;
+  try { u = new URL(text); } catch (_) { throw new Error("Endereço do servidor inválido"); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("Use http:// ou https://");
+  if (u.username || u.password) throw new Error("Não inclua usuário/senha no endereço");
+  if ((u.pathname !== "/" && u.pathname !== "") || u.search || u.hash) {
+    throw new Error("Informe só o endereço, sem caminho (ex.: https://gases.suaempresa.com.br)");
+  }
+  if (u.protocol === "http:" && !isPrivateHost(u.hostname)) {
+    throw new Error("Servidor fora da rede local exige https://");
+  }
+  return u.origin;
+}
+const apiBase = () => (NATIVE ? localStorage.getItem(SERVER_KEY) || "" : "");
+
 class OfflineError extends Error {}
 class AuthError extends Error {}
 
@@ -67,6 +125,7 @@ const tokenValid = () => state.token && jwtExp(state.token) > Date.now() + 30000
 
 async function api(path, { method = "GET", body, raw = false } = {}) {
   if (!online()) throw new OfflineError("Sem conexão");
+  if (NATIVE && !apiBase()) throw new Error("Configure o endereço do servidor na tela de login");
   if (!tokenValid() && path !== "/api/auth/login") throw new AuthError("Sessão expirada; faça login para sincronizar");
   const headers = { Accept: "application/json" };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -75,7 +134,7 @@ async function api(path, { method = "GET", body, raw = false } = {}) {
   const timer = setTimeout(() => ctrl.abort(), 20000);
   let res;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    res = await fetch(apiBase() + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body),
                               signal: ctrl.signal, credentials: "omit" });
   } catch (e) {
     throw new OfflineError(e.name === "AbortError" ? "Tempo de resposta esgotado" : "Falha de rede");
@@ -112,8 +171,24 @@ function guard(fn) {
   };
 }
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",", 2)[1] || "");
+    r.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+    r.readAsDataURL(blob);
+  });
+}
+
 async function download(path, filename) {
   const res = await api(path, { raw: true });
+  if (NATIVE) {
+    const blob = await res.blob();
+    if (blob.size > 15 * 1024 * 1024) throw new Error("Arquivo grande demais para o celular; exporte pelo computador");
+    const where = await nativeCall("save", { name: filename, mime: blob.type || "text/csv", data: await blobToBase64(blob) });
+    toast(where ? `Arquivo salvo: ${where}` : "Arquivo pronto para compartilhar");
+    return;
+  }
   const url = URL.createObjectURL(await res.blob());
   const a = h("a", { href: url, download: filename });
   document.body.append(a);
@@ -269,6 +344,19 @@ function promptRelogin() {
 
 // ---------------- leitor de QR (câmera) ----------------
 async function scanInto(input) {
+  if (NATIVE) {  // leitor nativo do app (câmera traseira, QR e códigos de barras)
+    try {
+      const text = await nativeCall("scan", {}, 10 * 60 * 1000);
+      if (!text) return;  // cancelado
+      input.value = cleanSerial(text);
+      input.dispatchEvent(new Event("change"));
+      toast(`Lido: ${input.value}`);
+    } catch (e) {
+      toast(e.message, "err");
+      input.focus();
+    }
+    return;
+  }
   if (!("BarcodeDetector" in window)) {
     toast("Navegador sem leitor nativo; use leitor USB/Bluetooth ou digite o número de série.", "err");
     input.focus();
@@ -791,20 +879,65 @@ async function logout() {
   $("#login-view").classList.remove("hidden");
 }
 
+// Troca de servidor no app Android: só sem operações pendentes (elas pertencem ao servidor anterior).
+async function applyServer(form) {
+  const wanted = normalizeServer(form.elements.server.value);
+  const current = localStorage.getItem(SERVER_KEY) || "";
+  if (wanted === current) return;
+  if (current && (await outbox.all()).length) {
+    throw new Error("Há operações não sincronizadas com o servidor atual. Sincronize antes de trocar de servidor.");
+  }
+  Object.assign(state, { token: null, me: null, sessionAt: 0, snapshot: null });
+  await kv.del("session");
+  await kv.del("snapshot");
+  localStorage.setItem(SERVER_KEY, wanted);
+  form.elements.server.value = wanted;
+}
+
+function renderPasswordForm() {
+  currentView = null;
+  document.querySelectorAll("#nav button").forEach((b) => b.classList.remove("active"));
+  const pwd = (name, label, auto) => h("label", {}, label,
+    h("input", { name, type: "password", required: true, minlength: name === "current_password" ? 1 : 10,
+                 maxlength: 128, autocomplete: auto }));
+  $("#main").replaceChildren(h("form", { class: "card narrow", onsubmit: guard(async (ev) => {
+    const f = formData(ev.target);
+    if (f.new_password !== f.confirm_password) throw new Error("A confirmação não confere com a nova senha");
+    await api("/api/auth/password", { method: "POST",
+      body: { current_password: f.current_password, new_password: f.new_password } });
+    ev.target.reset();
+    toast("Senha alterada. Use a nova senha no próximo login.");
+  }) },
+    h("h2", {}, "Trocar minha senha"),
+    pwd("current_password", "Senha atual", "current-password"),
+    pwd("new_password", "Nova senha", "new-password"),
+    pwd("confirm_password", "Confirme a nova senha", "new-password"),
+    h("p", { class: "muted" }, "Mínimo de 10 caracteres, combinando 3 de: minúscula, maiúscula, dígito, símbolo."),
+    h("button", { type: "submit" }, "Salvar nova senha")));
+}
+
+if (NATIVE) {
+  $("#server-field").classList.remove("hidden");
+  $("#login-form").elements.server.value = localStorage.getItem(SERVER_KEY) || "";
+  $("#login-form").elements.server.required = true;
+}
+
 $("#login-form").addEventListener("submit", guard(async (ev) => {
   $("#login-error").textContent = "";
   if (!online()) { $("#login-error").textContent = "O primeiro login precisa de internet."; return; }
   try {
+    if (NATIVE) await applyServer(ev.target);
     const r = await api("/api/auth/login", { method: "POST", body: formData(ev.target) });
     state.token = r.access_token;
     state.sessionAt = Date.now();
-    ev.target.reset();
+    ev.target.elements.password.value = "";
     await enterApp();
   } catch (e) {
     $("#login-error").textContent = e.message;
   }
 }));
 $("#logout").addEventListener("click", () => logout());
+$("#my-password").addEventListener("click", () => (online() ? renderPasswordForm() : toast("Trocar a senha precisa de internet.", "warn")));
 $("#sync-now").addEventListener("click", () => (tokenValid() ? flush() : promptRelogin()));
 
 window.addEventListener("online", () => { renderNet(); flush(); });
@@ -812,7 +945,7 @@ window.addEventListener("offline", () => { renderNet(); if (currentView === "ope
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") flush({ quiet: true }); });
 setInterval(() => flush({ quiet: true }), SYNC_INTERVAL_MS);
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !NATIVE) {  // no APK os arquivos já estão dentro do app
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((e) => console.warn("SW", e));
 }
 

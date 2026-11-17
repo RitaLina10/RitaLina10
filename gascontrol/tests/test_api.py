@@ -214,4 +214,4 @@ def test_deactivated_user_loses_access(client, users, admin):
 
 def test_index_served(client):
     r = client.get("/")
-    assert r.status_code == 200 and "GasControl" in r.text
+    assert r.status_code == 200 and "PB Gas Control" in r.text

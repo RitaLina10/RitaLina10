@@ -39,6 +39,11 @@ class LoginIn(Strict):
     password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
 
+class PasswordChangeIn(Strict):
+    current_password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    new_password: Annotated[str, StringConstraints(min_length=10, max_length=128)]
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

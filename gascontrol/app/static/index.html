@@ -3,17 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GasControl — Gestão de Cilindros</title>
+<title>PB Tecnologia - PB Gas Control</title>
 <link rel="stylesheet" href="/static/styles.css">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#0e2a47">
+<link rel="icon" href="/static/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="theme-color" content="#070d1b">
 </head>
 <body>
 <section id="login-view" class="center hidden">
   <form id="login-form" class="card narrow" autocomplete="on">
-    <h1>GasControl</h1>
+    <p class="vendor">PB Tecnologia</p>
+    <h1>PB Gas Control</h1>
     <p class="muted">Gestão e rastreabilidade de gases industriais e medicinais</p>
+    <label id="server-field" class="hidden">Servidor
+      <input name="server" data-skip type="text" inputmode="url" maxlength="200" autocomplete="off" spellcheck="false"
+             placeholder="http://192.168.0.10:8000 ou https://gases.suaempresa.com.br"></label>
     <label>E-mail <input name="email" type="email" required maxlength="254" autocomplete="username"></label>
     <label>Senha <input name="password" type="password" required maxlength="128" autocomplete="current-password"></label>
     <button type="submit">Entrar</button>
@@ -23,15 +28,19 @@
 
 <div id="app-view" class="hidden">
   <header class="topbar">
-    <strong>GasControl</strong>
+    <strong>PB Gas Control</strong>
     <nav id="nav"></nav>
     <span id="net" class="net"><span id="net-label"></span>
       <button id="sync-now" class="ghost sm" type="button">Sincronizar</button></span>
     <span id="who" class="muted"></span>
+    <button id="my-password" class="ghost sm" type="button">Minha senha</button>
     <button id="logout" class="ghost" type="button">Sair</button>
   </header>
   <main id="main"></main>
 </div>
+<footer class="brandbar">
+  <img src="/static/brand-footer.jpg" alt="Desenvolvido por PB Tecnologia" width="960" height="266" decoding="async">
+</footer>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js" type="module"></script>
 </body>

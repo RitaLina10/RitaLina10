@@ -1,0 +1,74 @@
+plugins {
+    id "com.android.application"
+}
+
+// Versão única do produto: lida de app/__init__.py (mesma do servidor).
+def initPy = file("../../app/__init__.py").text
+def matcher = initPy =~ /__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)"/
+if (!matcher.find()) throw new GradleException("__version__ não encontrado em app/__init__.py")
+def (vMajor, vMinor, vPatch) = [matcher.group(1) as int, matcher.group(2) as int, matcher.group(3) as int]
+
+// Assinatura de release via variáveis de ambiente (segredos do CI). Nunca versionar o keystore.
+def ksPath = System.getenv("PBGAS_KEYSTORE_FILE")
+def hasReleaseKey = ksPath != null && !ksPath.isEmpty() && file(ksPath).exists()
+
+android {
+    namespace "br.com.pbtecnologia.pbgascontrol"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "br.com.pbtecnologia.pbgascontrol"
+        minSdk 26
+        targetSdk 35
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName "${vMajor}.${vMinor}.${vPatch}"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            release {
+                storeFile file(ksPath)
+                storePassword System.getenv("PBGAS_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("PBGAS_KEY_ALIAS")
+                keyPassword System.getenv("PBGAS_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            if (hasReleaseKey) signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir("generated/pbgas-web")
+    }
+}
+
+// A interface web é a mesma do servidor: copiada para dentro do APK em cada build (fonte única).
+def copyWebAssets = tasks.register("copyWebAssets", Copy) {
+    from("../../app/static") {
+        include "index.html", "app.js", "db.js", "styles.css", "favicon.png", "icon-192.png", "brand-footer.jpg"
+    }
+    into(layout.buildDirectory.dir("generated/pbgas-web/web"))
+}
+tasks.named("preBuild") { dependsOn copyWebAssets }
+
+dependencies {
+    implementation "androidx.activity:activity:1.9.3"
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
+}

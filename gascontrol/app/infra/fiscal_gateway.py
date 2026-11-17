@@ -101,7 +101,7 @@ class FocusNFeGateway:
         self.cnpj = emitter_cnpj
         self._client = client or httpx.Client(
             base_url=self.base, auth=(token, ""), timeout=httpx.Timeout(20.0, connect=5.0),
-            headers={"User-Agent": "GasControl/2"}, follow_redirects=False)
+            headers={"User-Agent": "PBGasControl/2"}, follow_redirects=False)
         self._breaker = breaker or CircuitBreaker()
         self._retries = max_retries
         self._backoff = backoff_base

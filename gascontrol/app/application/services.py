@@ -177,6 +177,19 @@ class AuthService:
             log.info("user_created", extra={"user_id": user.id, "role": str(role)})
             return user
 
+    def change_password(self, actor: Actor, current: str, new: str) -> None:
+        if current == new:
+            raise ValidationFailed("A nova senha deve ser diferente da atual")
+        new_hash = hash_password(new)  # valida a força antes de tocar no banco
+        with self._uow() as uow:
+            u = uow.users.get(actor.user_id)
+            if not u or not u.active or not verify_password(current, u.password_hash):
+                raise Forbidden("Senha atual incorreta")
+            u.password_hash = new_hash
+            _audit(uow, actor.user_id, "TROCAR_SENHA", "usuario", u.id, {}, self._clock())
+            uow.commit()
+            log.info("password_changed", extra={"user_id": u.id})
+
     def list_users(self, actor: Actor) -> Sequence[User]:
         _require_role(actor, Role.ADMIN)
         with self._uow() as uow:

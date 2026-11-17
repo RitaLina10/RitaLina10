@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS: confia nas CAs do sistema e nas instaladas pelo usuário (para servidor com certificado
+  interno, ex.: Caddy "tls internal"). HTTP sem criptografia é liberado aqui porque o endereço do
+  servidor é escolhido pelo usuário (IP de rede local); a interface recusa http:// para endereços
+  públicos (ver normalizeServer em app.js).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

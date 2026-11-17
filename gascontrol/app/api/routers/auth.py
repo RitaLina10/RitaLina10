@@ -5,8 +5,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import Container, current_actor, get_container
-from app.api.schemas import ActiveIn, LoginIn, TokenOut, UserIn, UserOut
+from app.api.schemas import ActiveIn, LoginIn, PasswordChangeIn, TokenOut, UserIn, UserOut
 from app.application.services import Actor
+from app.domain.errors import Forbidden
 from app.observability import LOGIN_FAILURES
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -35,6 +36,20 @@ def login(body: LoginIn, request: Request, c: Container = Depends(get_container)
 def me(actor: Actor = Depends(current_actor), c: Container = Depends(get_container)) -> UserOut:
     user = c.auth.get_active_user(actor.user_id)
     return UserOut.model_validate(user)
+
+
+@router.post("/auth/password", status_code=204)
+def change_password(body: PasswordChangeIn, actor: Actor = Depends(current_actor),
+                    c: Container = Depends(get_container)) -> None:
+    key = f"pwd|{actor.user_id}"
+    if c.throttle.is_locked(key):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Muitas tentativas; aguarde")
+    try:
+        c.auth.change_password(actor, body.current_password, body.new_password)
+    except Forbidden:
+        c.throttle.fail(key)
+        raise
+    c.throttle.success(key)
 
 
 @router.get("/users", response_model=list[UserOut])

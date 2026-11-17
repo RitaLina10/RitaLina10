@@ -1,4 +1,4 @@
-# GasControl — Gestão e rastreabilidade de cilindros de gases industriais e medicinais
+# PB Tecnologia - PB Gas Control — Gestão e rastreabilidade de cilindros de gases industriais e medicinais
 
 Sistema próprio que cobre o núcleo funcional de soluções como Oryx Place, SAG, RTSys e OndeVou Gases:
 
@@ -13,7 +13,7 @@ Sistema próprio que cobre o núcleo funcional de soluções como Oryx Place, SA
 | Bloqueios regulatórios | Medicinal: envase exige lote; entrega exige lote APROVADO e válido; gás do lote = gás do cilindro |
 | Recall | `/api/lots/{id}/trace` lista todo cilindro e cliente que recebeu o lote |
 | Trilha de auditoria | Movimentações append-only, encadeadas por SHA-256 por cilindro. `/api/audit/verify` detecta adulteração |
-| App de campo **offline** | Instalável no celular (PWA). Funciona sem internet e sincroniza sozinho ao reconectar. Registra GPS e NF-e/romaneio |
+| App de campo **offline** | App Android (APK) ou PWA no navegador. Funciona sem internet e sincroniza sozinho ao reconectar. Registra GPS e NF-e/romaneio |
 | Assinatura eletrônica | Liberação de lote exige reconfirmar a senha. Grava o significado do ato e o hash |
 | Checklist pré-envase | Obrigatório para gás medicinal (visual, válvula, rótulo, cor NBR 12176, purga) |
 | Auditoria de cadastros | Toda criação/alteração de usuário, cliente, lote e cilindro, encadeada por hash |
@@ -146,6 +146,89 @@ Robustez:
 - O mapeamento de campos está todo em `app/infra/fiscal_gateway.py`. Confira com a documentação oficial (doc.focusnfe.com.br), principalmente os campos da Reforma Tributária (IBS/CBS).
 
 Limite: a remessa de **cilindro em comodato** (CFOP 5908/6908, NCM do recipiente) ainda não tem perfil próprio. Por ora, emita essa nota no sistema do contador.
+
+## Instaladores (Windows e Android)
+
+Os dois instaladores são gerados automaticamente pelo GitHub Actions (`.github/workflows/installers.yml`)
+a cada push que altera `gascontrol/`. Baixe em **Actions → execução → Artifacts**. Ao criar uma tag
+`v1.4.0`, eles também são publicados em uma **Release**.
+
+| Arquivo | Para quê |
+|---|---|
+| `PBGasControl-Setup-<versão>.exe` | Servidor + sistema completo num PC Windows 10/11 (64 bits) da empresa |
+| `PBGasControl-<versão>.apk` | App de campo para Android 8+ (motoristas/operadores) |
+
+### Windows (servidor)
+
+1. Execute `PBGasControl-Setup-x.y.z.exe` como administrador.
+2. Informe o e-mail do administrador e a porta (padrão 8000). Marque "Liberar acesso pela rede local" para os celulares acessarem.
+3. Ao final, o instalador mostra `PRIMEIRO-ACESSO.txt` com a **senha inicial gerada** e os endereços de rede (ex.: `http://192.168.0.10:8000`).
+4. Entre e troque a senha em **Minha senha**. Apague o `PRIMEIRO-ACESSO.txt`.
+
+O que o instalador faz:
+- O servidor roda como tarefa do Windows na conta SYSTEM, inicia junto com o computador (mesmo sem ninguém logado) e reinicia sozinho se cair.
+- Dados, configuração e logs ficam em `C:\ProgramData\PB Gas Control\` (acesso restrito a Administradores):
+  - `pbgas.db`: banco de dados.
+  - `config.env`: configuração (JWT_SECRET gerado na instalação; NF-e: `FISCAL_PROVIDER`, `FOCUS_TOKEN` etc.).
+  - `logs\pbgas.log`: logs JSON com rotação.
+  - `backups\`: cópia diária verificada, guardando as últimas 30.
+- Atualizar: execute o novo instalador por cima. Dados e configuração são preservados.
+- Desinstalar remove o programa, a tarefa e a regra de firewall. **Os dados são mantidos**.
+- Firewall: a regra vale só para redes Domínio/Privada. Se o Windows marcou a rede como "Pública", mude para "Privada".
+- Depois de editar `config.env`, reinicie o servidor: Agendador de Tarefas → "PB Gas Control" → Finalizar/Executar, ou reinicie o PC.
+
+> Servidor na internet (fora da rede local): use o modo Docker + Caddy com HTTPS (seção "Operação").
+> O servidor Windows atende a rede local por HTTP.
+
+### Android (app de campo)
+
+1. Copie o `.apk` para o celular e instale. Na primeira vez, autorize "instalar apps desta fonte".
+2. Na tela de login, preencha **Servidor**:
+   - Rede local: `192.168.0.10:8000` (endereço do `PRIMEIRO-ACESSO.txt`).
+   - Internet: `https://gases.suaempresa.com.br`.
+3. Entre com usuário e senha.
+
+Como funciona:
+- A interface vem **dentro do app**: abre e registra operações sem internet desde o primeiro uso após o login.
+  A fila offline sincroniza sozinha ao reconectar, igual à versão web.
+- **Leitor de QR nativo** (câmera traseira): QR `GC1:`, Code 128, Code 39, EAN-13 e Data Matrix.
+- **Exportações CSV** vão para `Downloads/PB Gas Control` e abrem o menu de compartilhar (WhatsApp, e-mail, Drive).
+- DANFE/XML abrem no navegador do celular.
+- Segurança:
+  - `http://` só é aceito para endereços de rede local; servidor público exige `https://`.
+  - Trocar de servidor só é permitido sem operações pendentes.
+  - Os dados do app ficam fora do backup em nuvem do Android.
+
+**Assinatura do APK (obrigatória para distribuir atualizações).** Sem chave configurada, o CI gera um
+APK de **teste** (`-teste.apk`, assinatura de depuração). Cada build de teste pode exigir desinstalar antes
+de instalar o próximo. Para gerar o APK oficial, crie a chave **uma vez** e guarde-a em local seguro:
+
+```bash
+keytool -genkeypair -v -keystore pbgas.jks -alias pbgas -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 pbgas.jks   # conteúdo do segredo PBGAS_KEYSTORE_BASE64
+```
+
+Cadastre em **GitHub → Settings → Secrets and variables → Actions** os segredos:
+`PBGAS_KEYSTORE_BASE64`, `PBGAS_KEYSTORE_PASSWORD`, `PBGAS_KEY_ALIAS` (`pbgas`) e `PBGAS_KEY_PASSWORD`.
+Perder essa chave impede atualizar o app nos aparelhos: será preciso desinstalar e reinstalar.
+
+### Compilar localmente
+
+```powershell
+# Windows (na pasta gascontrol): requer Python 3.13 e Inno Setup 6
+pip install -r requirements.txt pyinstaller==6.22.3
+python packaging/windows/make_version_info.py
+pyinstaller --noconfirm packaging/windows/pbgas-server.spec
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=1.4.0 packaging\windows\installer.iss
+# saída: dist\installer\PBGasControl-Setup-1.4.0.exe
+```
+
+```bash
+# Android (na pasta gascontrol/android): requer JDK 17, Android SDK 35 e Gradle 8.14
+gradle assembleDebug      # app/build/outputs/apk/debug/
+```
+
+A versão é única para servidor, instalador e APK: `app/__init__.py` (`__version__`).
 
 ## Estrutura
 

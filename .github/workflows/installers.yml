@@ -1,0 +1,154 @@
+# PB Tecnologia - PB Gas Control — testes + instaladores Windows (.exe) e Android (.apk)
+# Artefatos: aba "Actions" > execução > "Artifacts". Em tags v*, também publica uma Release.
+name: Instaladores
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["gascontrol/**", ".github/workflows/installers.yml"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: gascontrol
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: gascontrol/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: gascontrol/requirements*.txt
+      - name: Dependências
+        run: pip install -r requirements.txt pyinstaller==6.22.3
+      - name: Versão
+        id: ver
+        shell: pwsh
+        run: |
+          $v = python packaging/windows/make_version_info.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Empacotar servidor (PyInstaller)
+        run: pyinstaller --noconfirm packaging/windows/pbgas-server.spec
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; if ($LASTEXITCODE -ne 0) { exit 1 } }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Teste do instalador (instala, verifica /ready e login, desinstala)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\installer\PBGasControl-Setup-*.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=firewall','/LOG=setup.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 60; exit 1 }
+          $r = Invoke-RestMethod http://127.0.0.1:8000/ready -TimeoutSec 10
+          if ($r.status -ne 'ready') { throw "servidor não ficou pronto" }
+          $first = Get-Content "$env:ProgramData\PB Gas Control\PRIMEIRO-ACESSO.txt" -Raw
+          $pwd = [regex]::Match($first, 'Senha inicial:\s+(\S+)').Groups[1].Value
+          $body = @{ email = 'admin@pbgascontrol.com.br'; password = $pwd } | ConvertTo-Json
+          $tok = Invoke-RestMethod http://127.0.0.1:8000/api/auth/login -Method Post -Body $body -ContentType 'application/json'
+          if (-not $tok.access_token) { throw "login falhou" }
+          $task = Get-ScheduledTask -TaskName 'PB Gas Control'
+          if ($task.Principal.UserId -ne 'SYSTEM') { throw "tarefa sem conta SYSTEM" }
+          $un = Get-ChildItem "${env:ProgramFiles}\PB Tecnologia\PB Gas Control\unins*.exe" | Select-Object -First 1
+          $u = Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($u.ExitCode -ne 0) { exit 1 }
+          if (Get-ScheduledTask -TaskName 'PB Gas Control' -ErrorAction SilentlyContinue) { throw "tarefa não removida" }
+          Write-Output "Instalador OK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PBGasControl-Windows-${{ steps.ver.outputs.version }}
+          path: gascontrol/dist/installer/*.exe
+          if-no-files-found: error
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KEYSTORE_B64: ${{ secrets.PBGAS_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Keystore de release (se configurado nos segredos)
+        id: sign
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/pbgas.jks"
+            echo "PBGAS_KEYSTORE_FILE=$RUNNER_TEMP/pbgas.jks" >> "$GITHUB_ENV"
+            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "dir=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Sem PBGAS_KEYSTORE_BASE64: gerando APK de teste (debug). Veja README > Android."
+            echo "task=assembleDebug" >> "$GITHUB_OUTPUT"
+            echo "dir=debug" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compilar APK
+        working-directory: gascontrol/android
+        env:
+          PBGAS_KEYSTORE_PASSWORD: ${{ secrets.PBGAS_KEYSTORE_PASSWORD }}
+          PBGAS_KEY_ALIAS: ${{ secrets.PBGAS_KEY_ALIAS }}
+          PBGAS_KEY_PASSWORD: ${{ secrets.PBGAS_KEY_PASSWORD }}
+        run: gradle --no-daemon ${{ steps.sign.outputs.task }}
+      - name: Renomear APK
+        id: apk
+        run: |
+          v=$(python3 -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('app/__init__.py').read()).group(1))")
+          src=$(ls android/app/build/outputs/apk/${{ steps.sign.outputs.dir }}/*.apk | head -1)
+          suffix=$([ "${{ steps.sign.outputs.dir }}" = "release" ] && echo "" || echo "-teste")
+          mkdir -p dist/android && cp "$src" "dist/android/PBGasControl-$v$suffix.apk"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP/pbgas.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PBGasControl-Android-${{ steps.apk.outputs.version }}
+          path: gascontrol/dist/android/*.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/**/*

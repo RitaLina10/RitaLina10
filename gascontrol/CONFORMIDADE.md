@@ -11,7 +11,7 @@
 - **ABNT NBR 12176**: identificação de cilindros por cores. É usada no checklist pré-envase.
 - **Teste hidrostático periódico**: a periodicidade é configurável (`HYDRO_TEST_VALIDITY_YEARS`). Confirme com a norma aplicável ao seu tipo de cilindro.
 
-## Matriz: requisito → como o GasControl atende
+## Matriz: requisito → como o PB Gas Control atende
 
 | Requisito de boas práticas | O que o sistema faz | Onde |
 |---|---|---|
@@ -36,7 +36,7 @@
 2. **POPs escritos** que reflitam o uso do sistema: recebimento, envase, inspeção, liberação, expedição, recall, reclamações, calibração e limpeza.
 3. **Validação do sistema computadorizado**: um documento que prove que o sistema faz o que deve. Os 41 testes automatizados (`pytest`) servem de evidência de teste (OQ). Falta o plano de validação, os requisitos do usuário e o relatório assinado pelo RT.
 4. **Treinamento registrado** de cada usuário antes de receber acesso.
-5. **Comunicação à autoridade sanitária**: queixas técnicas e eventos adversos podem exigir notificação no sistema oficial da ANVISA. O GasControl registra e investiga, mas não envia a notificação.
+5. **Comunicação à autoridade sanitária**: queixas técnicas e eventos adversos podem exigir notificação no sistema oficial da ANVISA. O PB Gas Control registra e investiga, mas não envia a notificação.
 6. **Análise do produto**: o sistema registra o laudo, mas não substitui o controle de qualidade.
 7. **Cópia de segurança fora do servidor**: copie a pasta `backups/` para outro local, como nuvem ou disco externo. Teste a restauração periodicamente.
 
@@ -45,7 +45,7 @@
 | Prazo | Ação | Responsável |
 |---|---|---|
 | Semana 1 | Criar um usuário por pessoa (nada de login compartilhado). Definir quem é GESTOR/RT | Admin |
-| Semana 1 | Escrever o POP "Uso do GasControl" (envase com checklist, liberação assinada, entrega/coleta, uso offline) | RT |
+| Semana 1 | Escrever o POP "Uso do PB Gas Control" (envase com checklist, liberação assinada, entrega/coleta, uso offline) | RT |
 | Semana 2 | Cadastrar o parque de cilindros com a data real do último teste hidrostático | Operação |
 | Semana 2 | Simular um recall: abrir uma ocorrência, bloquear o lote, exportar o dossiê, conferir os clientes e devolver o lote à quarentena | RT |
 | Semana 3 | Documento de validação: requisitos → teste → evidência (os testes automatizados e os prints) | RT + TI |

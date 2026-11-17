@@ -13,12 +13,14 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import __version__
 from app.api.deps import Container
 from app.api.routers import auth, catalog, cylinders, fiscal, quality, reports, sync
 from app.application.fiscal_service import FiscalService
@@ -28,7 +30,7 @@ from app.application.security import LoginThrottle, TokenService
 from app.application.services import (
     AuthService, CatalogService, CylinderService, LotService, ReportService, SyncService,
 )
-from app.config import Settings, get_settings
+from app.config import APP_FULL_NAME, Settings, get_settings
 from app.domain.errors import DomainError
 from app.infra.db import build_engine, build_session_factory, upgrade_schema
 from app.infra.fiscal_gateway import DisabledFiscalGateway, FocusNFeGateway
@@ -123,7 +125,7 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
         log.info("shutdown")
 
     app = FastAPI(
-        title="GasControl", version="1.0.0", lifespan=lifespan,
+        title=APP_FULL_NAME, version=__version__, lifespan=lifespan,
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None, openapi_url=None if settings.is_production else "/openapi.json",
     )
@@ -157,6 +159,17 @@ def create_app(settings: Settings | None = None, fiscal_gateway: FiscalGateway |
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+    # App Android: a interface roda na origem do APK e chama a API por CORS com Bearer token
+    # (sem cookies => sem CSRF). Lista fechada de origens; nunca "*".
+    app.add_middleware(
+        CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+        expose_headers=["X-Request-ID"], max_age=600,
+        # Private Network Access: origem segura (APK) chamando servidor em IP de rede local.
+        allow_private_network=True,
+    )
 
     def _err(status: int, code: str, message: object) -> JSONResponse:
         return JSONResponse(status_code=status,

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PB Gas Control</string>
+    <string name="scan_prompt">Aponte para o QR ou código de barras do cilindro</string>
+    <string name="share_title">Compartilhar arquivo</string>
+    <string name="no_browser">Nenhum aplicativo para abrir o link</string>
+</resources>

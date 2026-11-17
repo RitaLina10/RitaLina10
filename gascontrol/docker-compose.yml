@@ -1,4 +1,4 @@
-# Produção: Caddy (HTTPS gratuito) -> GasControl. A aplicação não fica exposta diretamente.
+# Produção: Caddy (HTTPS gratuito) -> PB Gas Control. A aplicação não fica exposta diretamente.
 services:
   gascontrol:
     build: .
