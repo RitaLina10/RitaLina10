@@ -50,3 +50,8 @@
 | Semana 2 | Simular um recall: abrir uma ocorrência, bloquear o lote, exportar o dossiê, conferir os clientes e devolver o lote à quarentena | RT |
 | Semana 3 | Documento de validação: requisitos → teste → evidência (os testes automatizados e os prints) | RT + TI |
 | Mensal | Rodar "Verificar agora" na tela Auditoria e restaurar um backup em teste | TI |
+
+## LGPD e segurança
+
+Veja [LGPD.md](LGPD.md) (inventário de dados, bases legais, direitos do titular, retenção) e
+[SEGURANCA.md](SEGURANCA.md) (pentest, vulnerabilidades corrigidas e riscos residuais).

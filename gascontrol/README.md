@@ -149,6 +149,8 @@ Limite: a remessa de **cilindro em comodato** (CFOP 5908/6908, NCM do recipiente
 
 ## Instaladores (Windows e Android)
 
+> Segurança e privacidade: veja [SEGURANCA.md](SEGURANCA.md) (pentest) e [LGPD.md](LGPD.md).
+
 Os dois instaladores são gerados automaticamente pelo GitHub Actions (`.github/workflows/installers.yml`)
 a cada push que altera `gascontrol/`. Baixe em **Actions → execução → Artifacts**. Ao criar uma tag
 `v1.4.0`, eles também são publicados em uma **Release**.

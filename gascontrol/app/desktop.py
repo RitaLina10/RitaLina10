@@ -195,7 +195,8 @@ def serve() -> int:
     log.info("server_starting", extra={"port": port, "home": str(home), "lan": lan_addresses()})
     try:
         # HOST=127.0.0.1 restringe ao próprio PC; o padrão atende a rede local (celulares).
-        host = cfg.get("HOST", "0.0.0.0")  # nosec B104 - servidor de rede local por design
+        # Servidor de rede local por design (celulares acessam o PC).
+        host = cfg.get("HOST", "0.0.0.0")  # nosec B104
         uvicorn.run(app, host=host, port=port, log_config=None, access_log=False, server_header=False,
                     timeout_keep_alive=10, limit_concurrency=200, h11_max_incomplete_event_size=64 * 1024)
     finally:

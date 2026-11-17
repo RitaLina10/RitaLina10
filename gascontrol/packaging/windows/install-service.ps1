@@ -12,9 +12,13 @@ param(
     [switch]$OpenFirewall
 )
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'   # barra de progresso do Invoke-WebRequest trava sessões sem console
 $TaskName = 'PB Gas Control'
 $RuleName = 'PB Gas Control (rede local)'
 
+$transcript = Join-Path $env:TEMP 'pbgas-install-service.log'
+Start-Transcript -Path $transcript -Force | Out-Null
+try {
 if ($AdminEmail -notmatch '^[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)+$' -or $AdminEmail.Length -gt 254) {
     throw "E-mail do administrador inválido"
 }
@@ -60,11 +64,15 @@ Start-ScheduledTask -TaskName $TaskName
 $effective = $Port
 $m = Select-String -LiteralPath $cfg -Pattern '^\s*PORT\s*=\s*(\d+)\s*$' | Select-Object -First 1
 if ($m) { $effective = [int]$m.Matches[0].Groups[1].Value }
+$ready = $false
 $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
     try {
         $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri "http://127.0.0.1:$effective/ready"
-        if ($r.StatusCode -eq 200) { Write-Output "Servidor ativo na porta $effective"; exit 0 }
+        if ($r.StatusCode -eq 200) { Write-Output "Servidor ativo na porta $effective"; $ready = $true; break }
     } catch { Start-Sleep -Seconds 2 }
 }
-throw "O servidor não respondeu em 90 s. Veja $data\logs\pbgas.log"
+if (-not $ready) { throw "O servidor não respondeu em 90 s. Veja $data\logs\pbgas.log" }
+} finally {
+    Stop-Transcript | Out-Null
+}

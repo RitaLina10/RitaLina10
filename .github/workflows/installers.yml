@@ -31,8 +31,12 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: gascontrol/requirements*.txt
-      - run: pip install -r requirements-dev.txt
+      - run: pip install -r requirements-dev.txt bandit==1.9.4 pip-audit
       - run: python -m pytest -q
+      - name: Análise estática (bandit)
+        run: bandit -q -r app -s B104
+      - name: CVEs nas dependências (pip-audit)
+        run: pip-audit -r requirements.txt
 
   windows:
     needs: test
@@ -64,24 +68,39 @@ jobs:
           & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\windows\installer.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Teste do instalador (instala, verifica /ready e login, desinstala)
+        timeout-minutes: 12
         shell: pwsh
         run: |
+          function Show-Diag {
+            Write-Output "===== setup.log ====="; if (Test-Path setup.log) { Get-Content setup.log -Tail 80 }
+            Write-Output "===== install-service transcript ====="
+            Get-ChildItem $env:TEMP, "$env:SystemRoot\Temp" -Filter 'pbgas-install-service.log' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 80 }
+            Write-Output "===== pbgas.log ====="; $l = "$env:ProgramData\PB Gas Control\logs\pbgas.log"; if (Test-Path $l) { Get-Content $l -Tail 40 }
+            Write-Output "===== processos ====="; Get-Process | Where-Object { $_.Name -match 'setup|PBGas|pbgas|powershell|pwsh|icacls|schtasks|notepad' } | Format-Table Id, Name, StartTime -AutoSize | Out-String | Write-Output
+            Write-Output "===== tarefa ====="; Get-ScheduledTask -TaskName 'PB Gas Control' -ErrorAction SilentlyContinue | Get-ScheduledTaskInfo | Format-List | Out-String | Write-Output
+          }
           $setup = Get-ChildItem dist\installer\PBGasControl-Setup-*.exe | Select-Object -First 1
-          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=firewall','/LOG=setup.log' -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 60; exit 1 }
-          $r = Invoke-RestMethod http://127.0.0.1:8000/ready -TimeoutSec 10
-          if ($r.status -ne 'ready') { throw "servidor não ficou pronto" }
-          $first = Get-Content "$env:ProgramData\PB Gas Control\PRIMEIRO-ACESSO.txt" -Raw
-          $pwd = [regex]::Match($first, 'Senha inicial:\s+(\S+)').Groups[1].Value
-          $body = @{ email = 'admin@pbgascontrol.com.br'; password = $pwd } | ConvertTo-Json
-          $tok = Invoke-RestMethod http://127.0.0.1:8000/api/auth/login -Method Post -Body $body -ContentType 'application/json'
-          if (-not $tok.access_token) { throw "login falhou" }
-          $task = Get-ScheduledTask -TaskName 'PB Gas Control'
-          if ($task.Principal.UserId -ne 'SYSTEM') { throw "tarefa sem conta SYSTEM" }
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=firewall','/LOG=setup.log' -PassThru
+          if (-not $p.WaitForExit(300000)) { Write-Output "TIMEOUT do instalador"; Show-Diag; exit 1 }
+          if ($p.ExitCode -ne 0) { Show-Diag; exit 1 }
+          try {
+            $r = Invoke-RestMethod http://127.0.0.1:8000/ready -TimeoutSec 10
+            if ($r.status -ne 'ready') { throw "servidor não ficou pronto" }
+            $first = Get-Content "$env:ProgramData\PB Gas Control\PRIMEIRO-ACESSO.txt" -Raw
+            $pwd = [regex]::Match($first, 'Senha inicial:\s+(\S+)').Groups[1].Value
+            $body = @{ email = 'admin@pbgascontrol.com.br'; password = $pwd } | ConvertTo-Json
+            $tok = Invoke-RestMethod http://127.0.0.1:8000/api/auth/login -Method Post -Body $body -ContentType 'application/json'
+            if (-not $tok.access_token) { throw "login falhou" }
+            $task = Get-ScheduledTask -TaskName 'PB Gas Control'
+            if ($task.Principal.UserId -ne 'SYSTEM') { throw "tarefa sem conta SYSTEM" }
+            $acl = (Get-Acl "$env:ProgramData\PB Gas Control").Access | ForEach-Object { $_.IdentityReference.Value }
+            if ($acl -match 'Users|Usuários|Everyone|Todos') { throw "pasta de dados acessível a usuários comuns: $acl" }
+          } catch { Write-Output $_; Show-Diag; exit 1 }
           $un = Get-ChildItem "${env:ProgramFiles}\PB Tecnologia\PB Gas Control\unins*.exe" | Select-Object -First 1
-          $u = Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
-          if ($u.ExitCode -ne 0) { exit 1 }
+          $u = Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru
+          if (-not $u.WaitForExit(180000) -or $u.ExitCode -ne 0) { Write-Output "desinstalação falhou"; Show-Diag; exit 1 }
           if (Get-ScheduledTask -TaskName 'PB Gas Control' -ErrorAction SilentlyContinue) { throw "tarefa não removida" }
+          if (-not (Test-Path "$env:ProgramData\PB Gas Control\pbgas.db")) { throw "dados não foram preservados na desinstalação" }
           Write-Output "Instalador OK"
       - uses: actions/upload-artifact@v4
         with:
