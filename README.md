@@ -36,6 +36,7 @@ Estou aprendendo **Inteligência Artificial** na prática: uso IA no desenvolvim
 | **💽 PH Gerenciamento de Partições** | Gerenciador de partições para Windows e Windows Server: redimensiona, move e realoca espaço não alocado com simulação antes de aplicar | Python · Tkinter · PowerShell |
 | **🤖 Agente de Vendas** | Agente de vendas automatizado no WhatsApp, com atendimento assistido por IA | TypeScript · Node.js · Claude |
 | **🛡️ Proteção do DWAgent** | Mantém o acesso remoto (DWAgent) sempre ativo no Windows e exige senha para desativar ou desinstalar | PowerShell |
+| **🖥️ PB Remote** | Acesso remoto da PB Tecnologia (baseado no RustDesk): controle de computadores por ID e senha, transferência de arquivos, chat e servidor próprio | Rust · Flutter · Dart |
 | **🧪 PB Gases** | Controle e rastreabilidade de cilindros de gases industriais e medicinais: QR, lotes com liberação assinada, app de campo offline, NF-e, LGPD e instaladores para Windows e Android | Python · FastAPI · JavaScript · Java (Android) |
 | **🌐 Sites da PB Tecnologia** | Sites institucionais da PB Tecnologia e do PB IPTV | HTML · CSS · JavaScript |
 
